@@ -32,11 +32,19 @@ load_toolchains() {
   fi
 }
 
+have_systemd() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  # /run/systemd/system is a directory while systemd is PID 1, not a regular file.
+  [[ -d /run/systemd/system ]] && return 0
+  [[ "$(cat /proc/1/comm 2>/dev/null || true)" == "systemd" ]] && return 0
+  return 1
+}
+
 [[ "$(id -u)" -eq 0 ]] || die "请用 root 运行: sudo bash $0"
 [[ -d "$BACKEND_DIR" ]] || die "找不到 backend 目录: $BACKEND_DIR"
 [[ -d "$FRONTEND_DIR" ]] || die "找不到 frontend 目录: $FRONTEND_DIR"
 [[ -f "$UNIT_SRC" ]] || die "找不到 systemd 单元: $UNIT_SRC"
-[[ -f /run/systemd/system ]] || die "当前系统没有 systemd"
+have_systemd || die "当前系统没有 systemd"
 
 load_toolchains
 need_cmd cargo
