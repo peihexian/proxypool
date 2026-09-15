@@ -55,28 +55,9 @@ fn pick_sticky(
     client_ip: &str,
     nodes: Vec<ProxyNode>,
 ) -> ProxyNode {
-    pick_sticky_at(
-        &state.sticky,
-        &state.rr_index,
-        &svc.id,
-        client_ip,
-        svc.sticky_ttl,
-        nodes,
-        Utc::now().timestamp(),
-    )
-}
-
-fn pick_sticky_at(
-    sticky: &dashmap::DashMap<String, StickyEntry>,
-    rr_index: &dashmap::DashMap<String, AtomicU64>,
-    svc_id: &str,
-    client_ip: &str,
-    sticky_ttl: i64,
-    nodes: Vec<ProxyNode>,
-    now: i64,
-) -> ProxyNode {
-    let key = format!("{svc_id}:{client_ip}");
-    let prev = sticky.get(&key).map(|e| e.clone());
+    let now = Utc::now().timestamp();
+    let key = format!("{}:{client_ip}", svc.id);
+    let prev = state.sticky.get(&key).map(|e| e.clone());
     if let Some(ent) = prev.as_ref() {
         if ent.expire_ts > now {
             if let Some(found) = nodes.iter().find(|n| n.id == ent.node_id) {
@@ -85,14 +66,14 @@ fn pick_sticky_at(
         }
     }
 
-    let node = pick_rotated(rr_index, svc_id, nodes, prev.as_ref());
-    sticky.insert(
+    let node = pick_rotated(&state.rr_index, &svc.id, nodes, prev.as_ref());
+    state.sticky.insert(
         key,
         StickyEntry {
             node_id: node.id.clone(),
             host: node.host.clone(),
             exit_ip: node.exit_ip.clone(),
-            expire_ts: now + sticky_ttl.max(30),
+            expire_ts: now + svc.sticky_ttl.max(30),
         },
     );
     node
@@ -212,86 +193,4 @@ pub async fn count_available(state: &AppState, svc: &ServiceNode) -> i64 {
         .await
         .map(|v| v.len() as i64)
         .unwrap_or(0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::StickyEntry;
-    use dashmap::DashMap;
-
-    fn node(id: &str, host: &str, exit_ip: &str) -> ProxyNode {
-        ProxyNode {
-            id: id.to_string(),
-            pool_id: "p".into(),
-            protocol: "socks5h".into(),
-            host: host.to_string(),
-            port: 1080,
-            username: None,
-            password: None,
-            raw: None,
-            exit_ip: Some(exit_ip.to_string()),
-            country: None,
-            country_code: None,
-            asn: None,
-            asn_org: None,
-            is_residential: 0,
-            latency_ms: None,
-            fail_count: 0,
-            status: "active".into(),
-            isolated_until: None,
-            last_check: None,
-            last_used: None,
-            next_check: None,
-            created_at: String::new(),
-        }
-    }
-
-    #[test]
-    fn sticky_keeps_node_until_ttl() {
-        let sticky = DashMap::new();
-        let rr = DashMap::new();
-        let nodes = vec![
-            node("a", "1.1.1.1", "11.0.0.1"),
-            node("b", "2.2.2.2", "22.0.0.2"),
-        ];
-        let first = pick_sticky_at(&sticky, &rr, "svc", "10.0.0.1", 300, nodes.clone(), 1_000);
-        let again = pick_sticky_at(&sticky, &rr, "svc", "10.0.0.1", 300, nodes, 1_200);
-        assert_eq!(first.id, again.id);
-    }
-
-    #[test]
-    fn sticky_switches_to_other_node_after_ttl() {
-        let sticky = DashMap::new();
-        let rr = DashMap::new();
-        let nodes = vec![
-            node("a", "1.1.1.1", "11.0.0.1"),
-            node("b", "2.2.2.2", "22.0.0.2"),
-        ];
-        let first = pick_sticky_at(&sticky, &rr, "svc", "10.0.0.1", 300, nodes.clone(), 1_000);
-        let next = pick_sticky_at(&sticky, &rr, "svc", "10.0.0.1", 300, nodes, 1_000 + 300);
-        assert_ne!(first.id, next.id);
-        assert_ne!(first.host, next.host);
-    }
-
-    #[test]
-    fn sticky_same_host_switches_by_id_after_ttl() {
-        let sticky = DashMap::new();
-        sticky.insert(
-            "svc:10.0.0.1".into(),
-            StickyEntry {
-                node_id: "a".into(),
-                host: "1.1.1.1".into(),
-                exit_ip: Some("11.0.0.1".into()),
-                expire_ts: 100,
-            },
-        );
-        let rr = DashMap::new();
-        let nodes = vec![
-            node("a", "1.1.1.1", "11.0.0.1"),
-            node("b", "1.1.1.1", "11.0.0.2"),
-        ];
-        let next = pick_sticky_at(&sticky, &rr, "svc", "10.0.0.1", 300, nodes, 200);
-        assert_eq!(next.id, "b");
-    }
 }

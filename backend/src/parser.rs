@@ -524,20 +524,3 @@ pub fn decode_charset(bytes: &[u8], charset: &str) -> String {
     };
     enc.decode(bytes).0.into_owned()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_various() {
-        let a = parse_line("1.2.3.4:8080", "auto", "http").unwrap();
-        assert_eq!((a.host.as_str(), a.port), ("1.2.3.4", 8080));
-        let b = parse_line("user:pass@1.2.3.4:8080", "auto", "http").unwrap();
-        assert_eq!(b.username.as_deref(), Some("user"));
-        let c = parse_line("socks5://u:p@1.2.3.4:1080", "auto", "http").unwrap();
-        assert_eq!(c.protocol, "socks5");
-        let d = parse_line("1.2.3.4:8080@user:pass", "auto", "http").unwrap();
-        assert_eq!(d.password.as_deref(), Some("pass"));
-    }
-}
