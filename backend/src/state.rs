@@ -91,6 +91,14 @@ impl AppState {
         }
         *g = rows.into();
     }
+
+    /// Drop sticky bindings whose node was removed so the next CONNECT picks a live IP.
+    pub fn drop_sticky_for_nodes(&self, node_ids: &std::collections::HashSet<String>) {
+        if node_ids.is_empty() {
+            return;
+        }
+        self.sticky.retain(|_, ent| !node_ids.contains(&ent.node_id));
+    }
 }
 
 pub async fn load_service(db: &SqlitePool, id: &str) -> sqlx::Result<Option<ServiceNode>> {

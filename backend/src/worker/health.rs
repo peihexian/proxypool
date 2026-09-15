@@ -176,7 +176,7 @@ async fn restore_expired(state: &AppState) {
     .await;
 }
 
-async fn probe(node: &ProxyNode, policy: &DetectionPolicy) -> anyhow::Result<String> {
+pub(crate) async fn probe(node: &ProxyNode, policy: &DetectionPolicy) -> anyhow::Result<String> {
     let proxy_url = node_to_proxy_url(node)?;
     let proxy = reqwest::Proxy::all(&proxy_url)?;
     let client = reqwest::Client::builder()
