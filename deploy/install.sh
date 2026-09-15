@@ -52,6 +52,14 @@ need_cmd npm
 need_cmd install
 need_cmd systemctl
 
+if systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
+  log "停止旧服务 ${SERVICE_NAME}"
+  systemctl stop "$SERVICE_NAME" || true
+fi
+
+log "清理前端目录"
+rm -rf "$INSTALL_DIR/frontend/dist" "$FRONTEND_DIR/dist"
+
 log "编译 backend release: $BACKEND_DIR"
 (
   cd "$BACKEND_DIR"
@@ -67,11 +75,6 @@ log "构建 frontend: $FRONTEND_DIR"
   npm run build
 )
 [[ -f "$FRONTEND_DIR/dist/index.html" ]] || die "前端构建失败，缺少 dist/index.html"
-
-if systemctl is-active --quiet "$SERVICE_NAME"; then
-  log "停止已运行的 ${SERVICE_NAME}"
-  systemctl stop "$SERVICE_NAME"
-fi
 
 log "安装到 $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/frontend" "$INSTALL_DIR/data"

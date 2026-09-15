@@ -48,6 +48,8 @@ pub async fn stop_service(state: &AppState, id: &str) {
 
 pub async fn start_service(state: &AppState, svc: &ServiceNode) -> anyhow::Result<()> {
     stop_service(state, &svc.id).await;
+    let prefix = format!("{}:", svc.id);
+    state.sticky.retain(|k, _| !k.starts_with(&prefix));
     let addr = format!("{}:{}", svc.listen_host, svc.listen_port);
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("service {} listening on {addr}", svc.name);

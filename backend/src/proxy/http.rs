@@ -50,7 +50,7 @@ pub async fn handle(
     if method.eq_ignore_ascii_case("CONNECT") {
         let (host, port) = split_host_port(&target)?;
         let dest = format!("{host}:{port}");
-        let proxy_ip = node.host.clone();
+        let proxy_ip = selector::advertise_ip(&node);
         let upstream = chain::connect_via(&node, &host, port, true).await?;
         stream
             .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
@@ -62,7 +62,7 @@ pub async fn handle(
 
     let (host, port, path) = parse_absolute_url(&target, &headers)?;
     let dest = format!("{host}:{port}");
-    let proxy_ip = node.host.clone();
+    let proxy_ip = selector::advertise_ip(&node);
     let mut upstream = chain::connect_via(&node, &host, port, true).await?;
     let mut fwd = format!("{method} {path} HTTP/1.1\r\n");
     let mut has_host = false;

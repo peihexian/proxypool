@@ -78,7 +78,7 @@ pub async fn handle(
     let remote_dns = is_domain && svc.enable_socks5h != 0;
     let protocol = if remote_dns { "socks5h" } else { "socks5" };
     let dest = format!("{host}:{port}");
-    let proxy_ip = node.host.clone();
+    let proxy_ip = selector::advertise_ip(&node);
     let upstream = match chain::connect_via(&node, &host, port, remote_dns).await {
         Ok(s) => s,
         Err(e) => {

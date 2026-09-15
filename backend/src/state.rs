@@ -32,6 +32,8 @@ pub struct ListenerHandle {
 #[derive(Clone, Debug)]
 pub struct StickyEntry {
     pub node_id: String,
+    pub host: String,
+    pub exit_ip: Option<String>,
     pub expire_ts: i64,
 }
 
