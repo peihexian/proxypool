@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let geoip = Arc::new(GeoDb::new(data_dir.join("geoip")));
     let (traffic_tx, traffic_rx) = mpsc::channel::<TrafficEvent>(4096);
-    let state = AppState::new(db, data_dir.clone(), jwt_secret, geoip, traffic_tx);
+    let state = AppState::new(db, jwt_secret, geoip, traffic_tx);
 
     worker::spawn_all(state.clone(), traffic_rx);
     proxy::start_all(&state).await;

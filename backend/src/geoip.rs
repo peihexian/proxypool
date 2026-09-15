@@ -67,10 +67,6 @@ impl GeoDb {
         db
     }
 
-    pub fn dir(&self) -> &Path {
-        &self.dir
-    }
-
     pub fn reload(&self) -> Result<()> {
         std::fs::create_dir_all(&self.dir)?;
         let country = load_reader(&self.dir.join("GeoLite2-Country.mmdb"));

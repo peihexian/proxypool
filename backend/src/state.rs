@@ -2,7 +2,6 @@ use crate::geoip::GeoDb;
 use crate::models::ServiceNode;
 use dashmap::DashMap;
 use sqlx::SqlitePool;
-use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
@@ -11,14 +10,12 @@ use tokio::task::JoinHandle;
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
-    pub data_dir: PathBuf,
     pub jwt_secret: String,
     pub geoip: Arc<GeoDb>,
     pub listeners: Arc<DashMap<String, ListenerHandle>>,
     pub rr_index: Arc<DashMap<String, AtomicU64>>,
     pub sticky: Arc<DashMap<String, StickyEntry>>,
     pub traffic_tx: mpsc::Sender<TrafficEvent>,
-    pub reload_tx: broadcast::Sender<()>,
     pub bind_errors: Arc<DashMap<String, String>>,
 }
 
@@ -44,22 +41,18 @@ pub struct TrafficEvent {
 impl AppState {
     pub fn new(
         db: SqlitePool,
-        data_dir: PathBuf,
         jwt_secret: String,
         geoip: Arc<GeoDb>,
         traffic_tx: mpsc::Sender<TrafficEvent>,
     ) -> Self {
-        let (reload_tx, _) = broadcast::channel(16);
         Self {
             db,
-            data_dir,
             jwt_secret,
             geoip,
             listeners: Arc::new(DashMap::new()),
             rr_index: Arc::new(DashMap::new()),
             sticky: Arc::new(DashMap::new()),
             traffic_tx,
-            reload_tx,
             bind_errors: Arc::new(DashMap::new()),
         }
     }
