@@ -1,0 +1,22 @@
+[Unit]
+Description=ProxyPool proxy pool manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/proxypool
+ExecStart=/opt/proxypool/myproxy
+Environment=PORT=9090
+Environment=MYPROXY_DATA=/opt/proxypool/data
+Environment=RUST_LOG=info
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+LimitNOFILE=1048576
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=proxypool
+
+[Install]
+WantedBy=multi-user.target
