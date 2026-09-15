@@ -1,0 +1,38 @@
+[package]
+name = "myproxy"
+version = "0.1.0"
+edition = "2021"
+description = "Proxy pool manager similar to Resin"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["multipart", "macros"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+base64 = "0.22"
+bcrypt = "0.17"
+chrono = { version = "0.4", features = ["serde"] }
+dashmap = "6"
+encoding_rs = "0.8"
+futures = "0.3"
+headers = "0.4"
+jsonwebtoken = "9"
+maxminddb = "0.25"
+percent-encoding = "2"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "socks", "rustls-tls", "gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs", "trace", "limit"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[profile.release]
+lto = true
+codegen-units = 1

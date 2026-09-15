@@ -1,0 +1,93 @@
+@tailwind utilities;
+
+:root {
+  --sidebar: #0b1220;
+  --sidebar-2: #121a2b;
+  --accent: #22d3ee;
+  --accent-2: #38bdf8;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f3f6fb;
+  color: #0f172a;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.muted {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.stat-card {
+  border: none;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.stat-card .el-card__body {
+  padding: 18px 20px;
+}
+
+.copy-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.copy-row .el-input {
+  flex: 1;
+}
+
+.el-menu {
+  border-right: none !important;
+}
+
+.layout-side .el-menu-item.is-active {
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.18), transparent) !important;
+  color: #67e8f9 !important;
+}
+
+.layout-side .el-menu-item:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.login-bg {
+  min-height: 100%;
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(34, 211, 238, 0.18), transparent 50%),
+    radial-gradient(900px 400px at 100% 0%, rgba(56, 189, 248, 0.16), transparent 45%),
+    #070b14;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.el-table td.ops-col .cell,
+.el-table th.ops-col .cell {
+  white-space: nowrap !important;
+  word-break: keep-all;
+  overflow: visible;
+}
+
+.ops-btns {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.ops-btns .el-button {
+  margin-left: 0 !important;
+  padding: 4px 8px;
+}
