@@ -25,10 +25,10 @@
       <template #header>GeoIP 数据库</template>
       <el-descriptions :column="1" border>
         <el-descriptions-item label="Country 库更新时间">
-          {{ settings.geoip_country_updated_at || '尚未下载' }}
+          {{ formatTime(settings.geoip_country_updated_at, '尚未下载') }}
         </el-descriptions-item>
         <el-descriptions-item label="ASN 库更新时间">
-          {{ settings.geoip_asn_updated_at || '尚未下载' }}
+          {{ formatTime(settings.geoip_asn_updated_at, '尚未下载') }}
         </el-descriptions-item>
       </el-descriptions>
       <div class="mt-4">
@@ -43,6 +43,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { fetchSettings, saveSettings, updateGeoip } from '../api'
+import { formatTime } from '../format'
 
 const settings = ref<any>({})
 const serverHost = ref('127.0.0.1')

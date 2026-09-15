@@ -31,7 +31,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="updated_at" label="更新时间" min-width="180">
-        <template #default="{ row }">{{ fmt(row.updated_at) }}</template>
+        <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="280" min-width="280" class-name="ops-col" label-class-name="ops-col">
         <template #default="{ row }">
@@ -150,6 +150,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { checkPool, createPool, deletePool, fetchPolicies, fetchPools, syncPool, togglePool, updatePool } from '../api'
+import { formatTime } from '../format'
 
 const txtFormats = [
   { value: 'auto', label: '自动识别' },
@@ -192,11 +193,6 @@ function empty() {
     local_data: '',
     import_mode: 'replace',
   }
-}
-
-function fmt(s?: string) {
-  if (!s) return '-'
-  return s.replace('T', ' ').replace(/\+.*$/, '').replace('Z', '')
 }
 
 async function load() {

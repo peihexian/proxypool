@@ -43,6 +43,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { fetchDashboard } from '../api'
+import { formatBytes } from '../format'
 
 const data = ref<any>({})
 const chartRef = ref<HTMLDivElement>()
@@ -59,18 +60,6 @@ const top = computed(() => data.value.top_clients || [])
 const maxTop = computed(() => Math.max(1, ...top.value.map((x: any) => x.total || 0)))
 function pct(n: number) {
   return Math.round((n / maxTop.value) * 100)
-}
-
-function formatBytes(n: number) {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0
-  let v = n
-  while (v >= 1024 && i < u.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`
 }
 
 function renderChart() {

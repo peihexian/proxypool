@@ -1,4 +1,5 @@
 pub mod dashboard;
+pub mod logs;
 pub mod nodes;
 pub mod policies;
 pub mod pools;
@@ -22,7 +23,8 @@ pub fn router(state: AppState) -> Router {
         .merge(pools::router())
         .merge(nodes::router())
         .merge(services::router())
-        .merge(dashboard::router());
+        .merge(dashboard::router())
+        .merge(logs::router());
 
     Router::new()
         .route("/auth/login", post(login))

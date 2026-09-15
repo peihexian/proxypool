@@ -10,16 +10,34 @@ pub async fn connect_via(
     dest_port: u16,
     remote_dns: bool,
 ) -> Result<TcpStream> {
+    match tokio::time::timeout(
+        Duration::from_secs(30),
+        connect_via_inner(node, dest_host, dest_port, remote_dns),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => bail!("连接上游代理超时"),
+    }
+}
+
+async fn connect_via_inner(
+    node: &ProxyNode,
+    dest_host: &str,
+    dest_port: u16,
+    remote_dns: bool,
+) -> Result<TcpStream> {
     let addr = format!("{}:{}", node.host, node.port);
-    let mut stream = tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(&addr))
+    let mut stream = TcpStream::connect(&addr)
         .await
-        .context("连接上游代理超时")?
         .with_context(|| format!("连接上游 {addr} 失败"))?;
     stream.set_nodelay(true).ok();
 
     match node.protocol.as_str() {
         "socks5" | "socks5h" => {
-            let use_domain = remote_dns || node.protocol == "socks5h" || dest_host.parse::<std::net::IpAddr>().is_err();
+            let use_domain = remote_dns
+                || node.protocol == "socks5h"
+                || dest_host.parse::<std::net::IpAddr>().is_err();
             socks5_handshake(&mut stream, node, dest_host, dest_port, use_domain).await?;
         }
         _ => {
@@ -173,6 +191,8 @@ async fn http_connect(
     Ok(())
 }
 
+/// Bidirectional copy until either side closes. No idle timeout, so long LLM
+/// thinking / streaming responses are not cut off after the tunnel is up.
 pub async fn copy_counted(
     a: TcpStream,
     b: TcpStream,

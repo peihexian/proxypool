@@ -33,6 +33,10 @@
           <el-icon><Aim /></el-icon>
           <span>检测策略</span>
         </el-menu-item>
+        <el-menu-item index="/logs">
+          <el-icon><Document /></el-icon>
+          <span>使用日志</span>
+        </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <span>系统设置</span>
@@ -66,6 +70,7 @@ const title = computed(() => {
   if (route.path.startsWith('/pools')) return '节点池'
   if (route.path.startsWith('/services')) return '对外代理服务'
   if (route.path.startsWith('/policies')) return 'IP 检测策略'
+  if (route.path.startsWith('/logs')) return '使用日志'
   if (route.path.startsWith('/settings')) return '系统设置'
   return ''
 })

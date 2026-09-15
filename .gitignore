@@ -5,3 +5,5 @@ frontend/dist/
 *.db
 .DS_Store
 Thumbs.db
+/.playwright-mcp
+/data/

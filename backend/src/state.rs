@@ -1,11 +1,15 @@
 use crate::geoip::GeoDb;
 use crate::models::ServiceNode;
 use dashmap::DashMap;
+use serde::Serialize;
 use sqlx::SqlitePool;
+use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
+
+pub const USAGE_LOG_LIMIT: usize = 100;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -17,6 +21,7 @@ pub struct AppState {
     pub sticky: Arc<DashMap<String, StickyEntry>>,
     pub traffic_tx: mpsc::Sender<TrafficEvent>,
     pub bind_errors: Arc<DashMap<String, String>>,
+    pub usage_logs: Arc<Mutex<VecDeque<TrafficEvent>>>,
 }
 
 pub struct ListenerHandle {
@@ -30,12 +35,16 @@ pub struct StickyEntry {
     pub expire_ts: i64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TrafficEvent {
     pub service_id: String,
     pub client_ip: String,
+    pub proxy_ip: String,
+    pub dest: String,
+    pub protocol: String,
     pub bytes_up: u64,
     pub bytes_down: u64,
+    pub ts: i64,
 }
 
 impl AppState {
@@ -54,7 +63,31 @@ impl AppState {
             sticky: Arc::new(DashMap::new()),
             traffic_tx,
             bind_errors: Arc::new(DashMap::new()),
+            usage_logs: Arc::new(Mutex::new(VecDeque::new())),
         }
+    }
+
+    pub fn push_usage_log(&self, ev: TrafficEvent) {
+        let mut g = self.usage_logs.lock().unwrap_or_else(|e| e.into_inner());
+        g.push_front(ev);
+        g.truncate(USAGE_LOG_LIMIT);
+    }
+
+    pub fn snapshot_usage_logs(&self) -> Vec<TrafficEvent> {
+        self.usage_logs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    pub fn seed_usage_logs(&self, rows: Vec<TrafficEvent>) {
+        let mut g = self.usage_logs.lock().unwrap_or_else(|e| e.into_inner());
+        if !g.is_empty() {
+            return;
+        }
+        *g = rows.into();
     }
 }
 

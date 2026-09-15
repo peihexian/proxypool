@@ -49,16 +49,20 @@ pub async fn handle(
 
     if method.eq_ignore_ascii_case("CONNECT") {
         let (host, port) = split_host_port(&target)?;
+        let dest = format!("{host}:{port}");
+        let proxy_ip = node.host.clone();
         let upstream = chain::connect_via(&node, &host, port, true).await?;
         stream
             .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             .await?;
         let (up, down) = chain::copy_counted(stream, upstream).await;
-        emit_traffic(&state, &svc.id, &client_ip, up, down);
+        emit_traffic(&state, &svc.id, &client_ip, &proxy_ip, &dest, "http", up, down);
         return Ok(());
     }
 
     let (host, port, path) = parse_absolute_url(&target, &headers)?;
+    let dest = format!("{host}:{port}");
+    let proxy_ip = node.host.clone();
     let mut upstream = chain::connect_via(&node, &host, port, true).await?;
     let mut fwd = format!("{method} {path} HTTP/1.1\r\n");
     let mut has_host = false;
@@ -81,17 +85,32 @@ pub async fn handle(
         upstream.write_all(&rest).await?;
     }
     let (up, down) = chain::copy_counted(stream, upstream).await;
-    emit_traffic(&state, &svc.id, &client_ip, up, down);
+    emit_traffic(&state, &svc.id, &client_ip, &proxy_ip, &dest, "http", up, down);
     Ok(())
 }
 
-fn emit_traffic(state: &AppState, service_id: &str, client_ip: &str, up: u64, down: u64) {
-    let _ = state.traffic_tx.try_send(TrafficEvent {
+fn emit_traffic(
+    state: &AppState,
+    service_id: &str,
+    client_ip: &str,
+    proxy_ip: &str,
+    dest: &str,
+    protocol: &str,
+    up: u64,
+    down: u64,
+) {
+    let ev = TrafficEvent {
         service_id: service_id.to_string(),
         client_ip: client_ip.to_string(),
+        proxy_ip: proxy_ip.to_string(),
+        dest: dest.to_string(),
+        protocol: protocol.to_string(),
         bytes_up: up,
         bytes_down: down,
-    });
+        ts: chrono::Utc::now().timestamp(),
+    };
+    state.push_usage_log(ev.clone());
+    let _ = state.traffic_tx.try_send(ev);
 }
 
 async fn read_headers(stream: &mut TcpStream) -> Result<(Vec<u8>, Vec<u8>)> {

@@ -13,6 +13,7 @@ const router = createRouter({
         { path: 'pools/:id', component: () => import('./views/PoolDetail.vue') },
         { path: 'services', component: () => import('./views/Services.vue') },
         { path: 'policies', component: () => import('./views/Policies.vue') },
+        { path: 'logs', component: () => import('./views/UsageLogs.vue') },
         { path: 'settings', component: () => import('./views/Settings.vue') },
       ],
     },

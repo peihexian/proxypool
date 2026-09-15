@@ -76,6 +76,9 @@ pub async fn handle(
     };
 
     let remote_dns = is_domain && svc.enable_socks5h != 0;
+    let protocol = if remote_dns { "socks5h" } else { "socks5" };
+    let dest = format!("{host}:{port}");
+    let proxy_ip = node.host.clone();
     let upstream = match chain::connect_via(&node, &host, port, remote_dns).await {
         Ok(s) => s,
         Err(e) => {
@@ -88,12 +91,18 @@ pub async fn handle(
         .write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
         .await?;
     let (up, down) = chain::copy_counted(stream, upstream).await;
-    let _ = state.traffic_tx.try_send(TrafficEvent {
+    let ev = TrafficEvent {
         service_id: svc.id,
         client_ip,
+        proxy_ip,
+        dest,
+        protocol: protocol.to_string(),
         bytes_up: up,
         bytes_down: down,
-    });
+        ts: chrono::Utc::now().timestamp(),
+    };
+    state.push_usage_log(ev.clone());
+    let _ = state.traffic_tx.try_send(ev);
     Ok(())
 }
 

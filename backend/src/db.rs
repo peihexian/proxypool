@@ -106,6 +106,9 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             service_id TEXT NOT NULL,
             client_ip TEXT NOT NULL,
+            proxy_ip TEXT NOT NULL DEFAULT '',
+            dest TEXT NOT NULL DEFAULT '',
+            protocol TEXT NOT NULL DEFAULT '',
             bytes_up INTEGER NOT NULL DEFAULT 0,
             bytes_down INTEGER NOT NULL DEFAULT 0,
             ts INTEGER NOT NULL
@@ -117,6 +120,36 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
     ];
     for stmt in stmts {
         sqlx::query(stmt).execute(pool).await?;
+    }
+    ensure_column(
+        pool,
+        "traffic_logs",
+        "proxy_ip",
+        "ALTER TABLE traffic_logs ADD COLUMN proxy_ip TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
+    ensure_column(
+        pool,
+        "traffic_logs",
+        "dest",
+        "ALTER TABLE traffic_logs ADD COLUMN dest TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
+    ensure_column(
+        pool,
+        "traffic_logs",
+        "protocol",
+        "ALTER TABLE traffic_logs ADD COLUMN protocol TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
+    Ok(())
+}
+
+async fn ensure_column(pool: &SqlitePool, table: &str, column: &str, alter: &str) -> Result<()> {
+    let sql = format!("SELECT name FROM pragma_table_info('{table}')");
+    let names: Vec<String> = sqlx::query_scalar(&sql).fetch_all(pool).await?;
+    if !names.iter().any(|n| n == column) {
+        sqlx::query(alter).execute(pool).await?;
     }
     Ok(())
 }
