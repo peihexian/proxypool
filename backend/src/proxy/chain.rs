@@ -1,7 +1,7 @@
 use crate::models::ProxyNode;
 use anyhow::{bail, Context, Result};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 pub async fn connect_via(
@@ -21,13 +21,17 @@ pub async fn connect_via(
     }
 }
 
+/// Reach `dest` only by asking the selected upstream proxy to CONNECT.
+/// This process never dials the destination itself, so a v4-only proxy
+/// failing to egress IPv6 must surface as an error — never fall back to
+/// the host's own IPv6.
 async fn connect_via_inner(
     node: &ProxyNode,
     dest_host: &str,
     dest_port: u16,
     remote_dns: bool,
 ) -> Result<TcpStream> {
-    let addr = format!("{}:{}", node.host, node.port);
+    let addr = host_port(&node.host, node.port as u16);
     let mut stream = TcpStream::connect(&addr)
         .await
         .with_context(|| format!("连接上游 {addr} 失败"))?;
@@ -153,9 +157,8 @@ async fn http_connect(
     dest_host: &str,
     dest_port: u16,
 ) -> Result<()> {
-    let mut req = format!(
-        "CONNECT {dest_host}:{dest_port} HTTP/1.1\r\nHost: {dest_host}:{dest_port}\r\n"
-    );
+    let hp = host_port(dest_host, dest_port);
+    let mut req = format!("CONNECT {hp} HTTP/1.1\r\nHost: {hp}\r\n");
     if let (Some(u), Some(p)) = (&node.username, &node.password) {
         if !u.is_empty() {
             let token = base64::Engine::encode(
@@ -191,20 +194,104 @@ async fn http_connect(
     Ok(())
 }
 
+fn host_port(host: &str, port: u16) -> String {
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
 /// Bidirectional copy until either side closes. No idle timeout, so long LLM
 /// thinking / streaming responses are not cut off after the tunnel is up.
-pub async fn copy_counted(
-    a: TcpStream,
-    b: TcpStream,
-) -> (u64, u64) {
+///
+/// Byte counts are kept even if the peer resets after data has already been
+/// copied — `tokio::io::copy` would drop the count on BrokenPipe.
+pub async fn copy_counted(a: TcpStream, b: TcpStream) -> (u64, u64) {
     let (mut ar, mut aw) = a.into_split();
     let (mut br, mut bw) = b.into_split();
-    let c1 = tokio::io::copy(&mut ar, &mut bw);
-    let c2 = tokio::io::copy(&mut br, &mut aw);
-    match tokio::join!(c1, c2) {
-        (Ok(up), Ok(down)) => (up, down),
-        (Ok(up), Err(_)) => (up, 0),
-        (Err(_), Ok(down)) => (0, down),
-        (Err(_), Err(_)) => (0, 0),
+    let up = async {
+        let n = copy_with_count(&mut ar, &mut bw).await;
+        let _ = bw.shutdown().await;
+        n
+    };
+    let down = async {
+        let n = copy_with_count(&mut br, &mut aw).await;
+        let _ = aw.shutdown().await;
+        n
+    };
+    tokio::join!(up, down)
+}
+
+async fn copy_with_count<R, W>(reader: &mut R, writer: &mut W) -> u64
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut buf = [0u8; 16 * 1024];
+    let mut total = 0u64;
+    loop {
+        let n = match reader.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        let mut off = 0;
+        while off < n {
+            match writer.write(&buf[off..n]).await {
+                Ok(0) => {
+                    let _ = writer.flush().await;
+                    return total;
+                }
+                Ok(w) => {
+                    total += w as u64;
+                    off += w;
+                }
+                Err(_) => {
+                    let _ = writer.flush().await;
+                    return total;
+                }
+            }
+        }
+    }
+    let _ = writer.flush().await;
+    total
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_with_count;
+    use tokio::io::{duplex, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn copy_with_count_keeps_bytes_until_eof() {
+        let (mut reader, mut peer) = duplex(1024);
+        let payload = vec![7u8; 40_000];
+        let expected = payload.len() as u64;
+        let writer = tokio::spawn(async move {
+            peer.write_all(&payload).await.unwrap();
+            peer.shutdown().await.unwrap();
+        });
+        let n = copy_with_count(&mut reader, &mut tokio::io::sink()).await;
+        writer.await.unwrap();
+        assert_eq!(n, expected);
+    }
+
+    #[tokio::test]
+    async fn copy_with_count_keeps_bytes_if_writer_closes() {
+        let (mut src, mut src_peer) = duplex(4096);
+        let (mut dst, dst_peer) = duplex(64);
+        let writer = tokio::spawn(async move {
+            src_peer.write_all(&[1u8; 1000]).await.unwrap();
+            src_peer.shutdown().await.unwrap();
+        });
+        let closer = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            drop(dst_peer);
+        });
+        let n = copy_with_count(&mut src, &mut dst).await;
+        writer.await.unwrap();
+        closer.await.unwrap();
+        assert!(n > 0, "already-copied bytes must not be discarded as 0");
     }
 }
