@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(8080);
+        .unwrap_or(9090);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("MyProxy 管理端 http://0.0.0.0:{port}");
     tracing::info!("默认管理员密码: admin");
