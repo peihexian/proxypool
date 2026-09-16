@@ -22,6 +22,21 @@ pub struct AppState {
     pub traffic_tx: mpsc::Sender<TrafficEvent>,
     pub bind_errors: Arc<DashMap<String, String>>,
     pub usage_logs: Arc<Mutex<VecDeque<TrafficEvent>>>,
+    /// Pools currently refreshing a remote subscription. Health checks skip
+    /// these so a long probe round cannot isolate the still-serving old nodes.
+    pub syncing_pools: Arc<DashMap<String, ()>>,
+}
+
+/// Clears the pool's syncing flag even if the refresh errors or is cancelled.
+pub struct PoolSyncGuard {
+    pools: Arc<DashMap<String, ()>>,
+    id: String,
+}
+
+impl Drop for PoolSyncGuard {
+    fn drop(&mut self) {
+        self.pools.remove(&self.id);
+    }
 }
 
 pub struct ListenerHandle {
@@ -66,7 +81,20 @@ impl AppState {
             traffic_tx,
             bind_errors: Arc::new(DashMap::new()),
             usage_logs: Arc::new(Mutex::new(VecDeque::new())),
+            syncing_pools: Arc::new(DashMap::new()),
         }
+    }
+
+    pub fn enter_pool_sync(&self, pool_id: &str) -> PoolSyncGuard {
+        self.syncing_pools.insert(pool_id.to_string(), ());
+        PoolSyncGuard {
+            pools: self.syncing_pools.clone(),
+            id: pool_id.to_string(),
+        }
+    }
+
+    pub fn is_pool_syncing(&self, pool_id: &str) -> bool {
+        self.syncing_pools.contains_key(pool_id)
     }
 
     pub fn push_usage_log(&self, ev: TrafficEvent) {

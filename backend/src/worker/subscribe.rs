@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 use tokio::time::{interval, Duration};
 
 pub async fn run(state: AppState) {
@@ -137,9 +138,12 @@ enum ProbeOutcome {
     Fail,
 }
 
-/// Keep serving current nodes while new subscription IPs are probed. Only after
-/// probes finish are newcomers inserted; stale IPs are deleted last, and sticky
-/// sessions bound to removed nodes are dropped so the next CONNECT rotates.
+/// Overlapping-generation refresh:
+/// - Old nodes stay selectable for the whole round (the live pool is not emptied).
+/// - Each new IP is inserted as soon as its probe finishes, so traffic can move
+///   onto working newcomers without waiting for the slowest timeout.
+/// - IPs missing from the new list are deleted only after the round, and only
+///   if the pool would still have at least one active node.
 async fn replace_after_probe(
     state: &AppState,
     pool: &NodePool,
@@ -179,18 +183,8 @@ async fn replace_after_probe(
         }
     }
 
-    let probed = probe_newcomers(pool, policy, newcomers).await;
-    let now = now_rfc3339();
-    let isolate_until = (Utc::now()
-        + chrono::Duration::seconds(policy.isolate_seconds.max(60)))
-    .to_rfc3339();
-
-    for (p, outcome) in probed {
-        insert_probed_node(state, pool, &p, outcome, &now, &isolate_until).await?;
-    }
-
     let stale: Vec<ProxyNode> = existing
-        .into_iter()
+        .iter()
         .filter(|n| {
             !keep.contains(&node_key(
                 &n.protocol,
@@ -199,8 +193,44 @@ async fn replace_after_probe(
                 n.username.as_deref().unwrap_or(""),
             ))
         })
+        .cloned()
         .collect();
+    let keep_active = existing
+        .iter()
+        .filter(|n| {
+            n.status == "active"
+                && keep.contains(&node_key(
+                    &n.protocol,
+                    &n.host,
+                    n.port,
+                    n.username.as_deref().unwrap_or(""),
+                ))
+        })
+        .count();
     let stale_ids: HashSet<String> = stale.iter().map(|n| n.id.clone()).collect();
+    let overlap = parsed.len().saturating_sub(newcomers.len());
+    tracing::info!(
+        "pool {} refresh: overlap {}, probe {}, retire {}",
+        pool.name,
+        overlap,
+        newcomers.len(),
+        stale.len()
+    );
+
+    let _sync_guard = state.enter_pool_sync(&pool.id);
+    let admitted_ok =
+        admit_newcomers(state, pool, policy, newcomers, &stale_ids).await?;
+
+    let remaining_active = keep_active + admitted_ok;
+    if remaining_active == 0 && !stale.is_empty() {
+        tracing::warn!(
+            "pool {} new subscription has no working nodes, keeping {} previous IPs",
+            pool.name,
+            stale.len()
+        );
+        return Ok(parsed.len());
+    }
+
     for n in &stale {
         sqlx::query("DELETE FROM proxy_nodes WHERE id=?")
             .bind(&n.id)
@@ -210,7 +240,7 @@ async fn replace_after_probe(
     state.drop_sticky_for_nodes(&stale_ids);
     if !stale_ids.is_empty() {
         tracing::info!(
-            "pool {} dropped {} stale nodes and rebound sticky sessions",
+            "pool {} dropped {} stale nodes and rebound sticky sessions (admitted {admitted_ok} new active)",
             pool.name,
             stale_ids.len()
         );
@@ -218,25 +248,30 @@ async fn replace_after_probe(
     Ok(parsed.len())
 }
 
-async fn probe_newcomers(
+async fn admit_newcomers(
+    state: &AppState,
     pool: &NodePool,
     policy: &DetectionPolicy,
     newcomers: Vec<ParsedProxy>,
-) -> Vec<(ParsedProxy, ProbeOutcome)> {
+    stale_ids: &HashSet<String>,
+) -> anyhow::Result<usize> {
     if newcomers.is_empty() {
-        return Vec::new();
+        return Ok(0);
     }
+    let isolate_until = (Utc::now()
+        + chrono::Duration::seconds(policy.isolate_seconds.max(60)))
+    .to_rfc3339();
     let sem = Arc::new(Semaphore::new(8));
-    let mut handles = Vec::new();
+    let mut set = JoinSet::new();
     for p in newcomers {
-        let permit = match sem.clone().acquire_owned().await {
-            Ok(p) => p,
-            Err(_) => break,
-        };
+        let permit_sem = sem.clone();
         let pol = policy.clone();
         let pool = pool.clone();
-        handles.push(tokio::spawn(async move {
-            let _permit = permit;
+        set.spawn(async move {
+            let _permit = match permit_sem.acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => return (p, ProbeOutcome::Fail),
+            };
             let cand = candidate_from_parsed(&pool, &p);
             let start = Instant::now();
             let outcome = match crate::worker::health::probe(&cand, &pol).await {
@@ -250,16 +285,33 @@ async fn probe_newcomers(
                 }
             };
             (p, outcome)
-        }));
+        });
     }
-    let mut out = Vec::with_capacity(handles.len());
-    for h in handles {
-        match h.await {
-            Ok(v) => out.push(v),
+
+    let mut admitted_ok = 0usize;
+    while let Some(joined) = set.join_next().await {
+        match joined {
+            Ok((p, outcome)) => {
+                let ok = matches!(outcome, ProbeOutcome::Ok { .. });
+                let now = now_rfc3339();
+                match insert_probed_node(state, pool, &p, outcome, &now, &isolate_until).await {
+                    Ok(()) => {
+                        if ok {
+                            admitted_ok += 1;
+                            // Stop pinning clients to IPs that are leaving the
+                            // subscription once a verified replacement exists.
+                            if admitted_ok == 1 {
+                                state.drop_sticky_for_nodes(stale_ids);
+                            }
+                        }
+                    }
+                    Err(e) => tracing::warn!("insert probed {}:{}: {e}", p.host, p.port),
+                }
+            }
             Err(e) => tracing::warn!("subscribe probe task: {e}"),
         }
     }
-    out
+    Ok(admitted_ok)
 }
 
 fn candidate_from_parsed(pool: &NodePool, p: &ParsedProxy) -> ProxyNode {

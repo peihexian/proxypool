@@ -185,6 +185,16 @@ async fn eligible_nodes(state: &AppState, svc: &ServiceNode) -> Result<Vec<Proxy
     if svc.filter_residential == 1 {
         nodes.retain(|n| n.is_residential == 1);
     }
+    // Pending is only a fallback. Mixing untested IPs with working ones is what
+    // makes the proxy look "down" while a subscription refresh is still probing.
+    let active: Vec<ProxyNode> = nodes
+        .iter()
+        .filter(|n| n.status == "active")
+        .cloned()
+        .collect();
+    if !active.is_empty() {
+        return Ok(active);
+    }
     Ok(nodes)
 }
 

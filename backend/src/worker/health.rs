@@ -64,6 +64,9 @@ async fn check_due(state: &AppState) -> anyhow::Result<()> {
     let now = Utc::now();
 
     for pool in pools {
+        if state.is_pool_syncing(&pool.id) {
+            continue;
+        }
         let policy = pool
             .detection_policy_id
             .as_ref()
