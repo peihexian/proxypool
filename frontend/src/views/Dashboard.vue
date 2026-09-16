@@ -10,7 +10,8 @@
         <el-card class="stat-card" shadow="hover">
           <div class="muted">{{ s.label }}</div>
           <div class="mt-2 text-2xl font-bold">{{ s.value }}</div>
-          <div class="mt-1 text-xs text-slate-400">{{ s.sub }}</div>
+          <div class="mt-1 text-xs text-slate-400 leading-5">{{ s.sub }}</div>
+          <div v-if="s.extra" class="text-xs text-slate-400 leading-5">{{ s.extra }}</div>
         </el-card>
       </el-col>
     </el-row>
@@ -43,17 +44,22 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { fetchDashboard } from '../api'
-import { formatBytes } from '../format'
+import { formatBytes, formatCount } from '../format'
 
 const data = ref<any>({})
 const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 
 const stats = computed(() => [
-  { label: '号池代理 IP', value: data.value.total_nodes ?? 0, sub: `可用 ${data.value.active_nodes ?? 0}` },
-  { label: '被隔离数量', value: data.value.isolated_nodes ?? 0, sub: `待检测 ${data.value.pending_nodes ?? 0}` },
-  { label: '总流量消耗', value: formatBytes(data.value.total_bytes ?? 0), sub: `上传 ${formatBytes(data.value.total_up ?? 0)}` },
-  { label: '节点池 / 服务', value: `${data.value.pools ?? 0} / ${data.value.services ?? 0}`, sub: '已启用对外服务数' },
+  { label: '号池代理 IP', value: data.value.total_nodes ?? 0, sub: `可用 ${data.value.active_nodes ?? 0}`, extra: '' },
+  { label: '被隔离数量', value: data.value.isolated_nodes ?? 0, sub: `待检测 ${data.value.pending_nodes ?? 0}`, extra: '' },
+  {
+    label: '总流量消耗',
+    value: formatBytes(data.value.total_bytes ?? 0),
+    sub: `上传 ${formatBytes(data.value.total_up ?? 0)} / 下载 ${formatBytes(data.value.total_down ?? 0)}`,
+    extra: `调用 ${formatCount(data.value.total_requests ?? 0)} 次`,
+  },
+  { label: '节点池 / 服务', value: `${data.value.pools ?? 0} / ${data.value.services ?? 0}`, sub: '已启用对外服务数', extra: '' },
 ])
 
 const top = computed(() => data.value.top_clients || [])

@@ -34,14 +34,11 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
             .fetch_one(&state.db)
             .await?;
 
-    let (total_up,): (i64,) =
-        sqlx::query_as("SELECT COALESCE(SUM(bytes_up),0) FROM traffic_logs")
-            .fetch_one(&state.db)
-            .await?;
-    let (total_down,): (i64,) =
-        sqlx::query_as("SELECT COALESCE(SUM(bytes_down),0) FROM traffic_logs")
-            .fetch_one(&state.db)
-            .await?;
+    let (total_up, total_down, total_requests): (i64, i64, i64) = sqlx::query_as(
+        "SELECT COALESCE(SUM(bytes_up),0), COALESCE(SUM(bytes_down),0), COUNT(*) FROM traffic_logs",
+    )
+    .fetch_one(&state.db)
+    .await?;
 
     let since = chrono::Utc::now().timestamp() - 8 * 3600;
     let hourly: Vec<(i64, i64, i64)> = sqlx::query_as(
@@ -103,6 +100,7 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
         "total_up": total_up,
         "total_down": total_down,
         "total_bytes": total_up + total_down,
+        "total_requests": total_requests,
         "hours": hours,
         "top_clients": top5,
     })))

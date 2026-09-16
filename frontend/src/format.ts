@@ -21,3 +21,8 @@ export function formatBytes(n?: number | null) {
   }
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`
 }
+
+export function formatCount(n?: number | null) {
+  if (!n) return '0'
+  return n.toLocaleString('zh-CN')
+}
