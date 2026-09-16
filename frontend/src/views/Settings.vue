@@ -31,9 +31,9 @@
           {{ formatTime(settings.geoip_asn_updated_at, '尚未下载') }}
         </el-descriptions-item>
       </el-descriptions>
-      <div class="mt-4">
+      <div class="mt-4 flex flex-col sm:flex-row sm:items-center gap-2">
         <el-button type="primary" :loading="updating" @click="doUpdate">立即更新 GeoIP</el-button>
-        <span class="muted ml-2">将下载 GeoLite2 Country / ASN，用于出口国家与家庭宽带识别</span>
+        <span class="muted">将下载 GeoLite2 Country / ASN，用于出口国家与家庭宽带识别</span>
       </div>
     </el-card>
   </div>

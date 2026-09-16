@@ -5,8 +5,8 @@
       <div class="muted">节点规模、隔离情况与近 8 小时流量</div>
     </div>
 
-    <el-row :gutter="16" class="mb-4">
-      <el-col :span="6" v-for="s in stats" :key="s.label">
+    <el-row :gutter="16" class="mb-4 dash-row">
+      <el-col :xs="24" :sm="12" :md="6" v-for="s in stats" :key="s.label">
         <el-card class="stat-card" shadow="hover">
           <div class="muted">{{ s.label }}</div>
           <div class="mt-2 text-2xl font-bold">{{ s.value }}</div>
@@ -15,14 +15,14 @@
       </el-col>
     </el-row>
 
-    <el-row :gutter="16">
-      <el-col :span="16">
+    <el-row :gutter="16" class="dash-row">
+      <el-col :xs="24" :md="16">
         <el-card shadow="never">
           <template #header>近 8 小时流量消耗</template>
-          <div ref="chartRef" style="height: 320px"></div>
+          <div ref="chartRef" class="chart-box"></div>
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :xs="24" :md="8">
         <el-card shadow="never">
           <template #header>客户端流量 Top 5</template>
           <div v-if="!top.length" class="muted py-10 text-center">暂无流量数据</div>
@@ -66,10 +66,11 @@ function renderChart() {
   if (!chartRef.value) return
   if (!chart) chart = echarts.init(chartRef.value)
   const hours = data.value.hours || []
+  const mobile = window.innerWidth < 768
   chart.setOption({
     tooltip: { trigger: 'axis' },
     legend: { data: ['上传', '下载'] },
-    grid: { left: 48, right: 16, top: 32, bottom: 32 },
+    grid: { left: mobile ? 8 : 48, right: 12, top: 32, bottom: mobile ? 8 : 32, containLabel: true },
     xAxis: { type: 'category', data: hours.map((h: any) => h.label) },
     yAxis: { type: 'value', axisLabel: { formatter: (v: number) => formatBytes(v) } },
     series: [

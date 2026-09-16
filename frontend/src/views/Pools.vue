@@ -1,11 +1,13 @@
 <template>
   <div>
-    <div class="mb-4 flex items-center justify-between">
+    <div class="page-head">
       <div>
         <div class="page-title">节点池管理</div>
         <div class="muted">远程订阅或本地导入，支持多种协议文本/JSON 格式</div>
       </div>
-      <el-button type="primary" @click="open()">新增节点池</el-button>
+      <div class="page-head-actions">
+        <el-button type="primary" @click="open()">新增节点池</el-button>
+      </div>
     </div>
     <el-table :data="list" border stripe style="width: 100%">
       <el-table-column prop="name" label="名称" min-width="140">
@@ -78,7 +80,7 @@
             <el-input v-model="form.format_config.json_path" placeholder="例如 data.list，空则自动" />
           </el-form-item>
           <el-form-item v-if="form.format_config.json_preset === 'custom'" label="字段映射">
-            <div class="grid grid-cols-2 gap-2 w-full">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
               <el-input v-model="form.format_config.host_field" placeholder="host 字段" />
               <el-input v-model="form.format_config.port_field" placeholder="port 字段" />
               <el-input v-model="form.format_config.user_field" placeholder="username 字段" />

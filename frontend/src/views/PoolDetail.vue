@@ -1,19 +1,19 @@
 <template>
   <div>
-    <div class="mb-4 flex items-center justify-between">
+    <div class="page-head">
       <div>
         <el-button text @click="$router.push('/pools')">← 返回</el-button>
-        <div class="page-title inline-block ml-2">{{ pool.name || '节点列表' }}</div>
+        <div class="page-title">{{ pool.name || '节点列表' }}</div>
         <div class="muted">出口 IP / 国家 / ASN / 延迟与隔离状态</div>
       </div>
-      <div class="flex gap-2">
+      <div class="page-head-actions">
         <el-button @click="onCheckAll">全部检测</el-button>
         <el-button v-if="pool.source_type === 'remote'" type="primary" @click="onSync">同步订阅</el-button>
       </div>
     </div>
-    <div class="mb-3 flex gap-2">
-      <el-input v-model="q" placeholder="搜索 host / 出口 IP / ASN" clearable style="width: 260px" @keyup.enter="load" />
-      <el-select v-model="status" placeholder="状态" clearable style="width: 140px" @change="load">
+    <div class="filter-bar mb-3">
+      <el-input v-model="q" placeholder="搜索 host / 出口 IP / ASN" clearable class="filter-input" @keyup.enter="load" />
+      <el-select v-model="status" placeholder="状态" clearable class="filter-select" @change="load">
         <el-option label="全部" value="" />
         <el-option label="可用" value="active" />
         <el-option label="待检测" value="pending" />
@@ -65,10 +65,11 @@
         </template>
       </el-table-column>
     </el-table>
-    <div class="mt-3 flex justify-end">
+    <div class="mt-3 flex justify-end pagination-wrap">
       <el-pagination
         background
-        layout="total, prev, pager, next"
+        :small="isMobile"
+        :layout="isMobile ? 'total, prev, next' : 'total, prev, pager, next'"
         :total="total"
         :page-size="pageSize"
         v-model:current-page="page"
@@ -83,8 +84,10 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { checkNode, checkPool, deleteNode, fetchNodes, fetchPool, setNodeStatus, syncPool } from '../api'
+import { useMobile } from '../useMedia'
 
 const route = useRoute()
+const isMobile = useMobile()
 const pool = ref<any>({})
 const items = ref<any[]>([])
 const total = ref(0)

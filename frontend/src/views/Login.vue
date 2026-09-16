@@ -1,11 +1,11 @@
 <template>
-  <div class="login-bg flex items-center justify-center">
-    <div class="w-[420px] rounded-2xl bg-white/95 p-8 shadow-2xl">
+  <div class="login-bg flex items-center justify-center p-4">
+    <div class="w-full max-w-[420px] rounded-2xl bg-white/95 p-6 sm:p-8 shadow-2xl">
       <div class="mb-6 text-center">
         <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-cyan-300 text-xl font-black">
           P
         </div>
-        <h1 class="text-2xl font-bold">MyProxy</h1>
+        <h1 class="text-2xl font-bold">ProxyPool</h1>
         <p class="muted mt-1">代理池管理系统</p>
       </div>
       <el-form @submit.prevent="onLogin">

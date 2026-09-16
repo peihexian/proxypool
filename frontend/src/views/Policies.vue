@@ -1,11 +1,13 @@
 <template>
   <div>
-    <div class="mb-4 flex items-center justify-between">
+    <div class="page-head">
       <div>
         <div class="page-title">检测策略</div>
         <div class="muted">延迟探测、失败退避与隔离策略，可被节点池引用</div>
       </div>
-      <el-button type="primary" @click="open()">新增策略</el-button>
+      <div class="page-head-actions">
+        <el-button type="primary" @click="open()">新增策略</el-button>
+      </div>
     </div>
     <el-table :data="list" border stripe>
       <el-table-column prop="name" label="名称" min-width="140" />
@@ -20,7 +22,7 @@
         <template #default="{ row }">{{ failLabel(row.on_fail) }}</template>
       </el-table-column>
       <el-table-column prop="max_fails" label="最大失败" width="100" />
-      <el-table-column label="操作" width="160" fixed="right">
+      <el-table-column label="操作" width="160" class-name="ops-col" label-class-name="ops-col">
         <template #default="{ row }">
           <el-button text type="primary" @click="open(row)">编辑</el-button>
           <el-button text type="danger" @click="remove(row)">删除</el-button>

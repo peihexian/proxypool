@@ -1,11 +1,13 @@
 <template>
   <div>
-    <div class="mb-4 flex items-center justify-between">
+    <div class="page-head">
       <div>
         <div class="page-title">服务节点</div>
         <div class="muted">对外提供 HTTP / SOCKS5 / SOCKS5H，可按国家、ASN、家庭宽带过滤</div>
       </div>
-      <el-button type="primary" @click="open()">新增服务</el-button>
+      <div class="page-head-actions">
+        <el-button type="primary" @click="open()">新增服务</el-button>
+      </div>
     </div>
     <el-table :data="list" border stripe style="width: 100%">
       <el-table-column prop="name" label="名称" min-width="140" />

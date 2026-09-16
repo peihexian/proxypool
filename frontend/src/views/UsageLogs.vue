@@ -1,11 +1,13 @@
 <template>
   <div>
-    <div class="mb-4 flex items-center justify-between">
+    <div class="page-head">
       <div>
         <div class="page-title">使用日志</div>
         <div class="muted">最近 100 次已完成的代理请求（连接结束后记账，长连接会在结束后才出现）</div>
       </div>
-      <el-button @click="load(true)" :loading="loading">刷新</el-button>
+      <div class="page-head-actions">
+        <el-button @click="load(true)" :loading="loading">刷新</el-button>
+      </div>
     </div>
     <el-table :data="list" border stripe style="width: 100%" empty-text="暂无使用记录">
       <el-table-column label="时间" width="180">
