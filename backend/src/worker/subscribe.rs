@@ -6,7 +6,6 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::{interval, Duration};
@@ -267,16 +266,19 @@ async fn admit_newcomers(
         let permit_sem = sem.clone();
         let pol = policy.clone();
         let pool = pool.clone();
+        let st = state.clone();
         set.spawn(async move {
             let _permit = match permit_sem.acquire_owned().await {
                 Ok(p) => p,
                 Err(_) => return (p, ProbeOutcome::Fail),
             };
             let cand = candidate_from_parsed(&pool, &p);
-            let start = Instant::now();
-            let outcome = match crate::worker::health::probe(&cand, &pol).await {
+            let report = crate::worker::health::probe(&cand, &pol).await;
+            // 订阅刷新时的探测同样走上游，一样要入账
+            crate::worker::health::record_probe(&st, &cand, &pol.check_url, report.up, report.down);
+            let outcome = match report.result {
                 Ok(exit_ip) => ProbeOutcome::Ok {
-                    latency_ms: start.elapsed().as_millis() as i64,
+                    latency_ms: report.latency_ms,
                     exit_ip,
                 },
                 Err(e) => {

@@ -1,7 +1,7 @@
 use crate::models::ServiceNode;
 use crate::proxy::chain;
 use crate::proxy::selector;
-use crate::state::{AppState, TrafficEvent};
+use crate::state::{AppState, TrafficEvent, TRAFFIC_KIND_CLIENT};
 use anyhow::{bail, Result};
 use base64::Engine;
 use std::collections::HashMap;
@@ -105,6 +105,7 @@ fn emit_traffic(
         proxy_ip: proxy_ip.to_string(),
         dest: dest.to_string(),
         protocol: protocol.to_string(),
+        kind: TRAFFIC_KIND_CLIENT.to_string(),
         bytes_up: up,
         bytes_down: down,
         ts: chrono::Utc::now().timestamp(),

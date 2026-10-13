@@ -1,7 +1,7 @@
 use crate::models::ServiceNode;
 use crate::proxy::chain;
 use crate::proxy::selector;
-use crate::state::{AppState, TrafficEvent};
+use crate::state::{AppState, TrafficEvent, TRAFFIC_KIND_CLIENT};
 use anyhow::{bail, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -97,6 +97,7 @@ pub async fn handle(
         proxy_ip,
         dest,
         protocol: protocol.to_string(),
+        kind: TRAFFIC_KIND_CLIENT.to_string(),
         bytes_up: up,
         bytes_down: down,
         ts: chrono::Utc::now().timestamp(),

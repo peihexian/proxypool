@@ -11,6 +11,12 @@ use tokio::task::JoinHandle;
 
 pub const USAGE_LOG_LIMIT: usize = 100;
 
+/// 转发给客户端的业务流量。
+pub const TRAFFIC_KIND_CLIENT: &str = "client";
+/// 健康检查 / 订阅探测经过上游代理产生的流量。上游平台照常计费，
+/// 所以也要入账，否则看板的数字会明显低于上游后台。
+pub const TRAFFIC_KIND_PROBE: &str = "probe";
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
@@ -59,6 +65,8 @@ pub struct TrafficEvent {
     pub proxy_ip: String,
     pub dest: String,
     pub protocol: String,
+    /// `client` 或 `probe`，见上面的常量。
+    pub kind: String,
     pub bytes_up: u64,
     pub bytes_down: u64,
     pub ts: i64,

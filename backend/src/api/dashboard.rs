@@ -1,6 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::ApiResult;
-use crate::state::AppState;
+use crate::state::{AppState, TRAFFIC_KIND_PROBE};
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -75,16 +75,18 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
         }));
     }
 
-    // 最近 DAY_WINDOW 天（本地日）的每日用量。
+    // 最近 DAY_WINDOW 天（本地日）的每日用量，按 kind 分开聚合，
+    // 这样总量包含探测流量（与上游平台口径一致），同时能单独展示探测占比。
     let today = Local::now().date_naive();
     let first_day = today - Days::new((DAY_WINDOW - 1) as u64);
-    let daily: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+    let daily: Vec<(String, String, i64, i64, i64)> = sqlx::query_as(
         r#"SELECT date(ts, 'unixepoch', 'localtime') AS d,
+                  COALESCE(kind,'client'),
                   COALESCE(SUM(bytes_up),0),
                   COALESCE(SUM(bytes_down),0),
                   COUNT(*)
            FROM traffic_logs WHERE ts >= ?
-           GROUP BY d"#,
+           GROUP BY d, kind"#,
     )
     .bind(now_ts - (DAY_WINDOW + 1) * 86400)
     .fetch_all(&state.db)
@@ -92,23 +94,35 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
 
     let mut days = Vec::new();
     let (mut sum_up, mut sum_down, mut sum_requests) = (0i64, 0i64, 0i64);
+    let (mut sum_probe_up, mut sum_probe_down, mut sum_probe_requests) = (0i64, 0i64, 0i64);
     let (mut active_days, mut peak_total) = (0i64, 0i64);
-    let (mut peak_label, mut today_total, mut today_requests) =
-        (String::new(), 0i64, 0i64);
+    let (mut peak_label, mut today_total, mut today_requests) = (String::new(), 0i64, 0i64);
     for i in 0..DAY_WINDOW {
         let date = first_day + Days::new(i as u64);
         let key = date.format("%Y-%m-%d").to_string();
-        let found = daily.iter().find(|r| r.0 == key);
-        let up = found.map(|f| f.1).unwrap_or(0);
-        let down = found.map(|f| f.2).unwrap_or(0);
-        let requests = found.map(|f| f.3).unwrap_or(0);
+        let (mut up, mut down, mut requests) = (0i64, 0i64, 0i64);
+        let (mut probe_up, mut probe_down, mut probe_requests) = (0i64, 0i64, 0i64);
+        for row in daily.iter().filter(|r| r.0 == key) {
+            up += row.2;
+            down += row.3;
+            requests += row.4;
+            if row.1 == TRAFFIC_KIND_PROBE {
+                probe_up += row.2;
+                probe_down += row.3;
+                probe_requests += row.4;
+            }
+        }
         let total = up + down;
         if total > 0 {
             active_days += 1;
         }
         sum_up += up;
         sum_down += down;
-        sum_requests += requests;
+        sum_probe_up += probe_up;
+        sum_probe_down += probe_down;
+        sum_probe_requests += probe_requests;
+        // 「调用次数」只统计客户端业务请求，探测次数单独给
+        sum_requests += requests - probe_requests;
         let label = date.format("%m-%d").to_string();
         if total > peak_total {
             peak_total = total;
@@ -116,7 +130,7 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
         }
         if date == today {
             today_total = total;
-            today_requests = requests;
+            today_requests = requests - probe_requests;
         }
         days.push(json!({
             "date": key,
@@ -125,7 +139,11 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
             "up": up,
             "down": down,
             "total": total,
-            "requests": requests,
+            "requests": requests - probe_requests,
+            "probe_up": probe_up,
+            "probe_down": probe_down,
+            "probe_total": probe_up + probe_down,
+            "probe_requests": probe_requests,
         }));
     }
     let days_summary = json!({
@@ -133,6 +151,10 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
         "down": sum_down,
         "total": sum_up + sum_down,
         "requests": sum_requests,
+        "probe_up": sum_probe_up,
+        "probe_down": sum_probe_down,
+        "probe_total": sum_probe_up + sum_probe_down,
+        "probe_requests": sum_probe_requests,
         "avg": (sum_up + sum_down) / DAY_WINDOW,
         "active_days": active_days,
         "peak_label": peak_label,
@@ -144,7 +166,7 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
 
     let top: Vec<(String, i64, i64)> = sqlx::query_as(
         r#"SELECT client_ip, COALESCE(SUM(bytes_up),0), COALESCE(SUM(bytes_down),0)
-           FROM traffic_logs WHERE ts >= ?
+           FROM traffic_logs WHERE ts >= ? AND kind = 'client'
            GROUP BY client_ip
            ORDER BY (COALESCE(SUM(bytes_up),0)+COALESCE(SUM(bytes_down),0)) DESC
            LIMIT 5"#,

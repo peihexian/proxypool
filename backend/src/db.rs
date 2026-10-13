@@ -109,6 +109,7 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
             proxy_ip TEXT NOT NULL DEFAULT '',
             dest TEXT NOT NULL DEFAULT '',
             protocol TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL DEFAULT 'client',
             bytes_up INTEGER NOT NULL DEFAULT 0,
             bytes_down INTEGER NOT NULL DEFAULT 0,
             ts INTEGER NOT NULL
@@ -140,6 +141,14 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
         "traffic_logs",
         "protocol",
         "ALTER TABLE traffic_logs ADD COLUMN protocol TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
+    // 'client' = 转发给客户端的业务流量，'probe' = 健康检查/订阅探测经过上游的流量。
+    ensure_column(
+        pool,
+        "traffic_logs",
+        "kind",
+        "ALTER TABLE traffic_logs ADD COLUMN kind TEXT NOT NULL DEFAULT 'client'",
     )
     .await?;
     Ok(())

@@ -56,10 +56,13 @@
           <template #header>近 14 天概览</template>
           <div class="day-summary">
             <div class="summary-hero">
-              <div class="muted">14 天合计</div>
+              <div class="muted">14 天合计（含探测）</div>
               <div class="text-2xl font-bold">{{ formatBytes(summary.total) }}</div>
               <div class="muted mt-1">
                 上传 {{ formatBytes(summary.up) }} / 下载 {{ formatBytes(summary.down) }}
+              </div>
+              <div class="muted mt-1">
+                其中探测 {{ formatBytes(summary.probe_total) }} · {{ formatCount(summary.probe_requests) }} 次
               </div>
             </div>
             <div class="summary-grid">
@@ -68,7 +71,7 @@
                 <div class="summary-value">{{ formatBytes(summary.avg) }}</div>
               </div>
               <div>
-                <div class="muted">总调用次数</div>
+                <div class="muted">业务调用次数</div>
                 <div class="summary-value">{{ formatCount(summary.requests) }}</div>
               </div>
               <div>
@@ -166,11 +169,11 @@ const stats = computed(() => [
   { label: '号池代理 IP', value: data.value.total_nodes ?? 0, sub: `可用 ${data.value.active_nodes ?? 0}`, extra: '' },
   { label: '被隔离数量', value: data.value.isolated_nodes ?? 0, sub: `待检测 ${data.value.pending_nodes ?? 0}`, extra: '' },
   {
-    // 与下方「近 14 天概览」同源，保证两处数字一致
+    // 与下方「近 14 天概览」同源，保证两处数字一致；总量含探测流量
     label: '近 14 天流量',
     value: formatBytes(summary.value.total),
     sub: `上传 ${formatBytes(summary.value.up)} / 下载 ${formatBytes(summary.value.down)}`,
-    extra: `调用 ${formatCount(summary.value.requests)} 次`,
+    extra: `业务调用 ${formatCount(summary.value.requests)} 次`,
   },
   { label: '节点池 / 服务', value: `${data.value.pools ?? 0} / ${data.value.services ?? 0}`, sub: '已启用对外服务数', extra: '' },
 ])

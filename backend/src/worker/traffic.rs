@@ -22,12 +22,15 @@ pub async fn run(state: AppState, mut rx: mpsc::Receiver<TrafficEvent>) {
     }
 }
 
+/// 使用日志只展示客户端业务流量；探测流量只入账（看板统计），不占日志位。
 pub async fn load_recent(db: &sqlx::SqlitePool) -> Vec<TrafficEvent> {
-    let rows: Vec<(String, String, String, String, String, i64, i64, i64)> = sqlx::query_as(
+    let rows: Vec<(String, String, String, String, String, String, i64, i64, i64)> = sqlx::query_as(
         r#"SELECT service_id, client_ip,
                   COALESCE(proxy_ip,''), COALESCE(dest,''), COALESCE(protocol,''),
+                  COALESCE(kind,'client'),
                   bytes_up, bytes_down, ts
            FROM traffic_logs
+           WHERE kind = 'client'
            ORDER BY ts DESC, id DESC
            LIMIT ?"#,
     )
@@ -36,16 +39,19 @@ pub async fn load_recent(db: &sqlx::SqlitePool) -> Vec<TrafficEvent> {
     .await
     .unwrap_or_default();
     rows.into_iter()
-        .map(|(service_id, client_ip, proxy_ip, dest, protocol, up, down, ts)| TrafficEvent {
-            service_id,
-            client_ip,
-            proxy_ip,
-            dest,
-            protocol,
-            bytes_up: up as u64,
-            bytes_down: down as u64,
-            ts,
-        })
+        .map(
+            |(service_id, client_ip, proxy_ip, dest, protocol, kind, up, down, ts)| TrafficEvent {
+                service_id,
+                client_ip,
+                proxy_ip,
+                dest,
+                protocol,
+                kind,
+                bytes_up: up as u64,
+                bytes_down: down as u64,
+                ts,
+            },
+        )
         .collect()
 }
 
@@ -61,14 +67,15 @@ async fn flush(state: &AppState, buf: &mut Vec<TrafficEvent>) {
     let batch = std::mem::take(buf);
     for ev in batch {
         let _ = sqlx::query(
-            r#"INSERT INTO traffic_logs(service_id, client_ip, proxy_ip, dest, protocol, bytes_up, bytes_down, ts)
-               VALUES(?,?,?,?,?,?,?,?)"#,
+            r#"INSERT INTO traffic_logs(service_id, client_ip, proxy_ip, dest, protocol, kind, bytes_up, bytes_down, ts)
+               VALUES(?,?,?,?,?,?,?,?,?)"#,
         )
         .bind(&ev.service_id)
         .bind(&ev.client_ip)
         .bind(&ev.proxy_ip)
         .bind(&ev.dest)
         .bind(&ev.protocol)
+        .bind(&ev.kind)
         .bind(ev.bytes_up as i64)
         .bind(ev.bytes_down as i64)
         .bind(ev.ts)

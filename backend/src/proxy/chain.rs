@@ -1,5 +1,6 @@
 use crate::models::ProxyNode;
 use anyhow::{bail, Context, Result};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -211,19 +212,36 @@ pub async fn copy_counted(a: TcpStream, b: TcpStream) -> (u64, u64) {
     let (mut ar, mut aw) = a.into_split();
     let (mut br, mut bw) = b.into_split();
     let up = async {
-        let n = copy_with_count(&mut ar, &mut bw).await;
+        let n = copy_loop(&mut ar, &mut bw, None).await;
         let _ = bw.shutdown().await;
         n
     };
     let down = async {
-        let n = copy_with_count(&mut br, &mut aw).await;
+        let n = copy_loop(&mut br, &mut aw, None).await;
         let _ = aw.shutdown().await;
         n
     };
     tokio::join!(up, down)
 }
 
-async fn copy_with_count<R, W>(reader: &mut R, writer: &mut W) -> u64
+/// Same relay as [`copy_counted`], but every chunk is added to a shared counter
+/// as it is written, so the byte totals can be read while the connection is
+/// still open. Used to account for probe traffic.
+pub async fn relay_counted(a: TcpStream, b: TcpStream, up: &AtomicU64, down: &AtomicU64) {
+    let (mut ar, mut aw) = a.into_split();
+    let (mut br, mut bw) = b.into_split();
+    let u = async {
+        copy_loop(&mut ar, &mut bw, Some(up)).await;
+        let _ = bw.shutdown().await;
+    };
+    let d = async {
+        copy_loop(&mut br, &mut aw, Some(down)).await;
+        let _ = aw.shutdown().await;
+    };
+    tokio::join!(u, d);
+}
+
+async fn copy_loop<R, W>(reader: &mut R, writer: &mut W, counter: Option<&AtomicU64>) -> u64
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -245,6 +263,9 @@ where
                 }
                 Ok(w) => {
                     total += w as u64;
+                    if let Some(c) = counter {
+                        c.fetch_add(w as u64, Ordering::Relaxed);
+                    }
                     off += w;
                 }
                 Err(_) => {
