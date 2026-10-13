@@ -12,7 +12,7 @@
 - **服务节点**：对外监听 HTTP、SOCKS5、SOCKS5H，可按国家、ASN、住宅属性过滤
 - **选择策略**：轮询、低延迟、空闲优先、粘性会话（TTL 到期后换节点）
 - **使用日志**：最近 100 次已完成请求（客户端 IP、代理出口 IP、上下行流量）
-- **流量看板**：近 8 小时消耗与客户端 Top 5
+- **流量看板**：近 8 小时消耗、近 14 天每日用量（图表 + 明细）与客户端 Top 5
 
 流量在连接结束后记账。已经建立的隧道不会中途换 IP；粘性 TTL 只作用于下一次新的 CONNECT。
 
@@ -123,8 +123,11 @@ export MYPROXY_DATA="$PWD/data"
 | `PORT` | `9090` | 管理端 HTTP 端口 |
 | `MYPROXY_DATA` | `<工作目录>/data` | SQLite 与 GeoIP 目录 |
 | `RUST_LOG` | `info` | 日志级别 |
+| `TZ` | 系统时区 | 看板按本地时区切分小时 / 日期，例如 `TZ=Asia/Shanghai` |
 
 systemd 单元里已设置 `PORT=9090`、`MYPROXY_DATA=/opt/proxypool/data`。
+
+流量日志只保留最近 15 天，所以首页看板最多展示 14 天的每日用量。
 
 ## 使用要点
 

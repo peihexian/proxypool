@@ -2,7 +2,7 @@
   <div>
     <div class="mb-4">
       <div class="page-title">首页看板</div>
-      <div class="muted">节点规模、隔离情况与近 8 小时流量</div>
+      <div class="muted">节点规模、隔离情况与近 8 小时 / 近 14 天流量</div>
     </div>
 
     <el-row :gutter="16" class="mb-4 dash-row">
@@ -16,7 +16,7 @@
       </el-col>
     </el-row>
 
-    <el-row :gutter="16" class="dash-row">
+    <el-row :gutter="16" class="mb-4 dash-row">
       <el-col :xs="24" :md="16">
         <el-card shadow="never">
           <template #header>近 8 小时流量消耗</template>
@@ -37,18 +37,128 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <el-row :gutter="16" class="mb-4 dash-row">
+      <el-col :xs="24" :md="16">
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-head">
+              <span>近 14 天每日流量</span>
+              <span class="muted">柱状为上传 / 下载，折线为调用次数</span>
+            </div>
+          </template>
+          <div v-if="!hasDays" class="muted py-10 text-center">暂无流量数据</div>
+          <div v-else ref="daysChartRef" class="chart-box"></div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :md="8">
+        <el-card shadow="never" class="h-full">
+          <template #header>近 14 天概览</template>
+          <div class="day-summary">
+            <div class="summary-hero">
+              <div class="muted">14 天合计</div>
+              <div class="text-2xl font-bold">{{ formatBytes(summary.total) }}</div>
+              <div class="muted mt-1">
+                上传 {{ formatBytes(summary.up) }} / 下载 {{ formatBytes(summary.down) }}
+              </div>
+            </div>
+            <div class="summary-grid">
+              <div>
+                <div class="muted">日均流量</div>
+                <div class="summary-value">{{ formatBytes(summary.avg) }}</div>
+              </div>
+              <div>
+                <div class="muted">总调用次数</div>
+                <div class="summary-value">{{ formatCount(summary.requests) }}</div>
+              </div>
+              <div>
+                <div class="muted">峰值日</div>
+                <div class="summary-value">
+                  {{ summary.peak_total ? `${summary.peak_label} · ${formatBytes(summary.peak_total)}` : '-' }}
+                </div>
+              </div>
+              <div>
+                <div class="muted">有流量天数</div>
+                <div class="summary-value">{{ summary.active_days ?? 0 }} / 14</div>
+              </div>
+              <div>
+                <div class="muted">今日（{{ summary.today_label || '-' }}）</div>
+                <div class="summary-value">{{ formatBytes(summary.today_total) }}</div>
+              </div>
+              <div>
+                <div class="muted">今日调用</div>
+                <div class="summary-value">{{ formatCount(summary.today_requests) }} 次</div>
+              </div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="dash-row">
+      <el-col :span="24">
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-head">
+              <span>每日明细</span>
+              <span class="muted">保留最近 15 天，最新在前</span>
+            </div>
+          </template>
+          <el-table
+            :data="dayRows"
+            border
+            stripe
+            style="width: 100%"
+            empty-text="暂无流量数据"
+            show-summary
+            :summary-method="daySummary"
+          >
+            <el-table-column prop="date" label="日期" min-width="140">
+              <template #default="{ row }">
+                <span class="mono">{{ row.date }}</span>
+                <span class="muted ml-1">{{ row.weekday }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="up" label="上传" min-width="110" align="right">
+              <template #default="{ row }">{{ formatBytes(row.up) }}</template>
+            </el-table-column>
+            <el-table-column prop="down" label="下载" min-width="110" align="right">
+              <template #default="{ row }">{{ formatBytes(row.down) }}</template>
+            </el-table-column>
+            <el-table-column prop="total" label="合计" min-width="110" align="right">
+              <template #default="{ row }">
+                <span class="font-bold">{{ formatBytes(row.total) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="requests" label="调用次数" min-width="110" align="right">
+              <template #default="{ row }">{{ formatCount(row.requests) }}</template>
+            </el-table-column>
+            <el-table-column prop="ratio" label="占比" min-width="150">
+              <template #default="{ row }">
+                <div class="flex items-center gap-2">
+                  <el-progress :percentage="share(row.total)" :show-text="false" color="#38bdf8" />
+                  <span class="muted shrink-0">{{ share(row.total) }}%</span>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { fetchDashboard } from '../api'
 import { formatBytes, formatCount } from '../format'
 
 const data = ref<any>({})
 const chartRef = ref<HTMLDivElement>()
+const daysChartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
+let daysChart: echarts.ECharts | null = null
 
 const stats = computed(() => [
   { label: '号池代理 IP', value: data.value.total_nodes ?? 0, sub: `可用 ${data.value.active_nodes ?? 0}`, extra: '' },
@@ -66,6 +176,42 @@ const top = computed(() => data.value.top_clients || [])
 const maxTop = computed(() => Math.max(1, ...top.value.map((x: any) => x.total || 0)))
 function pct(n: number) {
   return Math.round((n / maxTop.value) * 100)
+}
+
+const days = computed<any[]>(() => data.value.days || [])
+const summary = computed(() => data.value.days_summary || {})
+const hasDays = computed(() => days.value.some((d) => (d.total || 0) > 0 || (d.requests || 0) > 0))
+/** 明细表按日期倒序，最新的一天在最上面。 */
+const dayRows = computed(() => [...days.value].reverse())
+const daysTotal = computed(() => days.value.reduce((sum, d) => sum + (d.total || 0), 0))
+function share(n: number) {
+  if (!daysTotal.value) return 0
+  return Math.round(((n || 0) / daysTotal.value) * 1000) / 10
+}
+function daySummary({ columns }: any) {
+  const out: string[] = []
+  columns.forEach((col: any, i: number) => {
+    switch (col.property) {
+      case 'date':
+        out[i] = '合计'
+        break
+      case 'up':
+        out[i] = formatBytes(summary.value.up)
+        break
+      case 'down':
+        out[i] = formatBytes(summary.value.down)
+        break
+      case 'total':
+        out[i] = formatBytes(summary.value.total)
+        break
+      case 'requests':
+        out[i] = formatCount(summary.value.requests)
+        break
+      default:
+        out[i] = ''
+    }
+  })
+  return out
 }
 
 function renderChart() {
@@ -86,12 +232,70 @@ function renderChart() {
   })
 }
 
-async function load() {
-  data.value = await fetchDashboard()
-  renderChart()
+function renderDaysChart() {
+  if (!daysChartRef.value) return
+  if (!daysChart) daysChart = echarts.init(daysChartRef.value)
+  const rows = days.value
+  const mobile = window.innerWidth < 768
+  daysChart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      formatter: (ps: any) => {
+        const d = rows[ps?.[0]?.dataIndex ?? 0]
+        if (!d) return ''
+        return [
+          `${d.date} ${d.weekday}`,
+          `上传 ${formatBytes(d.up)}`,
+          `下载 ${formatBytes(d.down)}`,
+          `合计 ${formatBytes(d.total)}`,
+          `调用 ${formatCount(d.requests)} 次`,
+        ].join('<br/>')
+      },
+    },
+    legend: { data: ['上传', '下载', '调用次数'] },
+    grid: { left: mobile ? 8 : 48, right: mobile ? 8 : 52, top: 32, bottom: mobile ? 8 : 32, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: rows.map((d: any) => d.label),
+      axisLabel: { interval: mobile ? 2 : 0 },
+    },
+    yAxis: [
+      { type: 'value', axisLabel: { formatter: (v: number) => formatBytes(v) } },
+      {
+        type: 'value',
+        name: '次',
+        splitLine: { show: false },
+        axisLabel: { formatter: (v: number) => formatCount(v) },
+      },
+    ],
+    series: [
+      { name: '上传', type: 'bar', stack: 'day', data: rows.map((d: any) => d.up), itemStyle: { color: '#38bdf8' } },
+      { name: '下载', type: 'bar', stack: 'day', data: rows.map((d: any) => d.down), itemStyle: { color: '#22d3ee' } },
+      {
+        name: '调用次数',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        symbolSize: 6,
+        data: rows.map((d: any) => d.requests),
+        itemStyle: { color: '#f59e0b' },
+        lineStyle: { width: 2, color: '#f59e0b' },
+      },
+    ],
+  })
 }
 
-const onResize = () => chart?.resize()
+async function load() {
+  data.value = await fetchDashboard()
+  await nextTick()
+  renderChart()
+  renderDaysChart()
+}
+
+const onResize = () => {
+  chart?.resize()
+  daysChart?.resize()
+}
 onMounted(async () => {
   await load()
   window.addEventListener('resize', onResize)
@@ -99,5 +303,34 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   chart?.dispose()
+  daysChart?.dispose()
 })
 </script>
+
+<style scoped>
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.day-summary .summary-hero {
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  padding-top: 12px;
+}
+
+.summary-value {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+</style>
