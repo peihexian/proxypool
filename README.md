@@ -144,13 +144,32 @@ systemd 单元里已设置 `PORT=9090`、`MYPROXY_DATA=/opt/proxypool/data`。
 
 ## 发布流水线
 
-配置在 `.github/workflows/release.yml`。推送 `v*` tag 时会：
+配置在 `.github/workflows/release.yml`。推送 `v*` tag 后自动跑四个阶段：
 
-1. `npm ci` / `npm run build` 打前端
-2. 在 Ubuntu x64、Ubuntu ARM、Windows 上 `cargo build --release --locked`
-3. 打出 tar.gz / zip，附 `SHA256SUMS.txt`，创建 GitHub Release
+1. **preflight**：校验 tag 与 `backend/Cargo.toml` 里的版本号是否一致（不一致只告警，不阻断）
+2. **frontend**：`npm ci` + `npm run build`，产物作为 artifact 传给后面的编译任务
+3. **backend**：矩阵编译 Ubuntu x64、Ubuntu ARM64、Windows x64 三个平台（`cargo build --release --locked`，Windows 静态链接 CRT，下载后无需装 VC++ 运行库）
+4. **release**：解包后先做冒烟测试——真的启动二进制、调一次登录接口、拉一次首页，通过才打 `tar.gz` / `zip` 并生成 `SHA256SUMS.txt`，最后发布到 GitHub Release
 
-也可在 Actions 里手动跑 `Release` 工作流（不打 tag 则只保留构建产物、不发 Release）。
+发布到 Release 的文件：
+
+| 平台 | 文件 |
+|---|---|
+| Linux x86_64 | `proxypool-<tag>-linux-amd64.tar.gz` |
+| Linux arm64 | `proxypool-<tag>-linux-arm64.tar.gz` |
+| Windows x64 | `proxypool-<tag>-windows-amd64.zip` |
+
+发版步骤：
+
+```bash
+# 版本号与 tag 保持一致，例如 backend/Cargo.toml 里是 0.1.0
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+tag 名里带 `-` 的（如 `v0.2.0-beta.1`）会自动标记为预发布，不会顶掉 latest。
+
+也可在 Actions 页面手动跑 `Release` 工作流：不打 tag 时只保留构建产物（workflow artifact），不创建 Release。
 
 ## 许可证
 

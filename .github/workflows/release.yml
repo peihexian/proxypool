@@ -1,5 +1,7 @@
 name: Release
 
+# 打 tag（v*）后自动编译三平台安装包并发到 GitHub Release；
+# 也可以在 Actions 页面手动触发（手动触发只产出 workflow artifact，不发 Release）。
 on:
   push:
     tags:
@@ -9,10 +11,39 @@ on:
 permissions:
   contents: write
 
+# 同一个 tag 只允许一个发版流程，避免并发抢同一个 Release
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 tag 与 Cargo.toml 版本
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          ver="$(sed -n 's/^version *= *"\(.*\)"/\1/p' backend/Cargo.toml | head -n1)"
+          echo "tag=${GITHUB_REF_NAME}  Cargo.toml=${ver}"
+          if [ "$tag" != "$ver" ]; then
+            echo "::warning::tag ${GITHUB_REF_NAME} 与 backend/Cargo.toml 的版本 ${ver} 不一致，请确认是否需要同步版本号"
+          fi
+
   frontend:
     name: Build frontend
+    needs: preflight
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -33,28 +64,28 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
+          if-no-files-found: error
           retention-days: 7
 
   backend:
     name: Build ${{ matrix.artifact }}
     needs: frontend
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             artifact: linux-amd64
-            bin: myproxy
-            archive: tar.gz
+            rustflags: ""
           - os: ubuntu-24.04-arm
             artifact: linux-arm64
-            bin: myproxy
-            archive: tar.gz
+            rustflags: ""
           - os: windows-latest
             artifact: windows-amd64
-            bin: myproxy.exe
-            archive: zip
+            # 静态链接 CRT，用户下载后无需再装 VC++ 运行库
+            rustflags: "-C target-feature=+crt-static"
     steps:
       - uses: actions/checkout@v4
 
@@ -68,9 +99,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
+          key: ${{ matrix.artifact }}
 
       - name: Build backend
         working-directory: backend
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo build --release --locked
 
       - name: Pack (Linux)
@@ -78,13 +112,13 @@ jobs:
         shell: bash
         env:
           ARTIFACT: ${{ matrix.artifact }}
-          BIN: ${{ matrix.bin }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           STAGE="proxypool-${TAG}-${ARTIFACT}"
+          rm -rf "${STAGE}" "${STAGE}.tar.gz"
           mkdir -p "${STAGE}/frontend" "${STAGE}/deploy"
-          install -m 0755 "backend/target/release/${BIN}" "${STAGE}/myproxy"
+          install -m 0755 "backend/target/release/myproxy" "${STAGE}/myproxy"
           cp -a frontend/dist "${STAGE}/frontend/dist"
           cp deploy/proxypool.service "${STAGE}/deploy/"
           cp deploy/install-release.sh "${STAGE}/install.sh"
@@ -92,6 +126,45 @@ jobs:
           cp README.md LICENSE "${STAGE}/"
           tar -czf "${STAGE}.tar.gz" "${STAGE}"
           ls -lh "${STAGE}.tar.gz"
+
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          set -euo pipefail
+          STAGE="proxypool-${GITHUB_REF_NAME}-${ARTIFACT}"
+          rm -rf /tmp/smoke && mkdir -p /tmp/smoke
+          tar -xzf "${STAGE}.tar.gz" -C /tmp/smoke
+          test -f "/tmp/smoke/${STAGE}/frontend/dist/index.html"
+          test -x "/tmp/smoke/${STAGE}/install.sh"
+
+          cd "/tmp/smoke/${STAGE}"
+          PORT=18080 MYPROXY_DATA="$(mktemp -d)" ./myproxy >/tmp/myproxy.log 2>&1 &
+          PID=$!
+          ok=0
+          for _ in $(seq 1 20); do
+            if curl -fsS -X POST http://127.0.0.1:18080/api/auth/login \
+                 -H 'content-type: application/json' \
+                 -d '{"password":"admin"}' -o /tmp/login.json; then
+              ok=1; break
+            fi
+            sleep 1
+          done
+          if [ "$ok" != "1" ]; then
+            cat /tmp/myproxy.log
+            kill "$PID" 2>/dev/null || true
+            echo "::error::打包后的 myproxy 未能启动"
+            exit 1
+          fi
+          grep -q '"token"' /tmp/login.json
+          # 注意写成 -o 再 grep：直接 curl | grep -q 会因 SIGPIPE 触发 pipefail
+          curl -fsS -o /tmp/index.html http://127.0.0.1:18080/
+          grep -q 'ProxyPool' /tmp/index.html
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null || true
+          echo "smoke test ok"
 
       - name: Pack (Windows)
         if: runner.os == 'Windows'
@@ -101,6 +174,7 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF_NAME
           $stage = "proxypool-$tag-$env:ARTIFACT"
+          Remove-Item -Recurse -Force $stage, "$stage.zip" -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path "$stage/frontend", "$stage/deploy" | Out-Null
           Copy-Item backend/target/release/myproxy.exe "$stage/myproxy.exe"
           Copy-Item -Recurse frontend/dist "$stage/frontend/dist"
@@ -108,6 +182,48 @@ jobs:
           Copy-Item README.md, LICENSE "$stage/"
           Compress-Archive -Path $stage -DestinationPath "$stage.zip"
           Get-Item "$stage.zip" | Format-List Name, Length
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = "proxypool-$env:GITHUB_REF_NAME-$env:ARTIFACT"
+          $root = Join-Path $env:RUNNER_TEMP 'smoke'
+          Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+          Expand-Archive -Path "$stage.zip" -DestinationPath $root
+          $dir = Join-Path $root $stage
+          if (-not (Test-Path (Join-Path $dir 'frontend/dist/index.html'))) { throw '包内缺少前端产物' }
+          if (-not (Test-Path (Join-Path $dir 'run.bat'))) { throw '包内缺少 run.bat' }
+
+          $env:MYPROXY_DATA = Join-Path $env:RUNNER_TEMP 'smoke-data'
+          New-Item -ItemType Directory -Force -Path $env:MYPROXY_DATA | Out-Null
+          $env:PORT = '18081'
+          $p = Start-Process -FilePath (Join-Path $dir 'myproxy.exe') -WorkingDirectory $dir -PassThru -WindowStyle Hidden
+
+          $token = $null
+          for ($i = 0; $i -lt 20 -and -not $token; $i++) {
+            try {
+              $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18081/api/auth/login' -Method Post `
+                     -ContentType 'application/json' -Body '{"password":"admin"}' -TimeoutSec 5
+              $token = $r.token
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+          if (-not $token) {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            throw '打包后的 myproxy.exe 未能启动'
+          }
+          $page = Invoke-WebRequest -Uri 'http://127.0.0.1:18081/' -TimeoutSec 10
+          if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'ProxyPool') {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            throw '前端页面未能正常返回'
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Write-Host 'smoke test ok'
 
       - uses: actions/upload-artifact@v4
         with:
@@ -123,6 +239,7 @@ jobs:
     needs: backend
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -133,13 +250,47 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: |
-          sha256sum proxypool-*.tar.gz proxypool-*.zip > SHA256SUMS.txt
+          set -euo pipefail
           ls -lh
+          sha256sum proxypool-*.tar.gz proxypool-*.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v2
+      - name: Publish
+        uses: softprops/action-gh-release@v2
         with:
+          name: ProxyPool ${{ github.ref_name }}
+          # tag 里带 - 的（如 v0.2.0-beta.1）自动标记为预发布
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## 下载
+
+            | 平台 | 文件 |
+            | --- | --- |
+            | Linux x86_64 | `proxypool-${{ github.ref_name }}-linux-amd64.tar.gz` |
+            | Linux arm64 | `proxypool-${{ github.ref_name }}-linux-arm64.tar.gz` |
+            | Windows x64 | `proxypool-${{ github.ref_name }}-windows-amd64.zip` |
+
+            ### Linux 安装
+
+            ```bash
+            tar -xzf proxypool-${{ github.ref_name }}-linux-amd64.tar.gz
+            cd proxypool-${{ github.ref_name }}-linux-amd64
+            sudo bash install.sh
+            ```
+
+            安装脚本会装到 `/opt/proxypool` 并注册 `proxypool.service`，数据保留在 `/opt/proxypool/data`，重复安装不会清空。
+
+            ### Windows 使用
+
+            解压后双击 `run.bat`，浏览器打开 <http://127.0.0.1:9090>（默认密码 `admin`，登录后请立即修改）。
+
+            ### 校验下载
+
+            ```bash
+            sha256sum -c SHA256SUMS.txt
+            ```
           files: |
             dist/proxypool-*.tar.gz
             dist/proxypool-*.zip
