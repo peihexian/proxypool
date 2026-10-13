@@ -39,12 +39,8 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
             .fetch_one(&state.db)
             .await?;
 
-    let (total_up, total_down, total_requests): (i64, i64, i64) = sqlx::query_as(
-        "SELECT COALESCE(SUM(bytes_up),0), COALESCE(SUM(bytes_down),0), COUNT(*) FROM traffic_logs",
-    )
-    .fetch_one(&state.db)
-    .await?;
-
+    // 顶部卡片与「近 14 天概览」共用下面同一份按本地日聚合的结果，
+    // 不再单独对全表求和——表里是滚动 15 天，和 14 天日历窗口对不齐，会显示出两个数。
     // 小时 / 天都按服务器本地时区切分，前端标签才不会出现时区错位。
     let now_ts = chrono::Utc::now().timestamp();
     let tz_offset = Local::now().offset().local_minus_utc() as i64;
@@ -175,10 +171,6 @@ async fn overview(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json
         "active_nodes": active_nodes,
         "isolated_nodes": isolated_nodes,
         "pending_nodes": pending_nodes,
-        "total_up": total_up,
-        "total_down": total_down,
-        "total_bytes": total_up + total_down,
-        "total_requests": total_requests,
         "hours": hours,
         "days": days,
         "days_summary": days_summary,

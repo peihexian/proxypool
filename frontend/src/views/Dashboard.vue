@@ -160,14 +160,17 @@ const daysChartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 let daysChart: echarts.ECharts | null = null
 
+const summary = computed(() => data.value.days_summary || {})
+
 const stats = computed(() => [
   { label: '号池代理 IP', value: data.value.total_nodes ?? 0, sub: `可用 ${data.value.active_nodes ?? 0}`, extra: '' },
   { label: '被隔离数量', value: data.value.isolated_nodes ?? 0, sub: `待检测 ${data.value.pending_nodes ?? 0}`, extra: '' },
   {
-    label: '总流量消耗',
-    value: formatBytes(data.value.total_bytes ?? 0),
-    sub: `上传 ${formatBytes(data.value.total_up ?? 0)} / 下载 ${formatBytes(data.value.total_down ?? 0)}`,
-    extra: `调用 ${formatCount(data.value.total_requests ?? 0)} 次`,
+    // 与下方「近 14 天概览」同源，保证两处数字一致
+    label: '近 14 天流量',
+    value: formatBytes(summary.value.total),
+    sub: `上传 ${formatBytes(summary.value.up)} / 下载 ${formatBytes(summary.value.down)}`,
+    extra: `调用 ${formatCount(summary.value.requests)} 次`,
   },
   { label: '节点池 / 服务', value: `${data.value.pools ?? 0} / ${data.value.services ?? 0}`, sub: '已启用对外服务数', extra: '' },
 ])
@@ -179,7 +182,6 @@ function pct(n: number) {
 }
 
 const days = computed<any[]>(() => data.value.days || [])
-const summary = computed(() => data.value.days_summary || {})
 const hasDays = computed(() => days.value.some((d) => (d.total || 0) > 0 || (d.requests || 0) > 0))
 /** 明细表按日期倒序，最新的一天在最上面。 */
 const dayRows = computed(() => [...days.value].reverse())
@@ -214,13 +216,41 @@ function daySummary({ columns }: any) {
   return out
 }
 
+/**
+ * 图表 tooltip 专用：统一换算成 MB，避免出现 4194304 这种看不清单位的裸字节。
+ * 不足 1 MB 时退到 KB / B，保证小流量也读得出来。
+ */
+function formatChartBytes(n?: number | null) {
+  const v = Number(n) || 0
+  if (v >= 1048576) {
+    const mb = v / 1048576
+    return `${mb.toFixed(mb >= 100 ? 0 : mb >= 10 ? 1 : 2)} MB`
+  }
+  if (v >= 1024) return `${(v / 1024).toFixed(1)} KB`
+  return `${v} B`
+}
+
 function renderChart() {
   if (!chartRef.value) return
   if (!chart) chart = echarts.init(chartRef.value)
   const hours = data.value.hours || []
   const mobile = window.innerWidth < 768
   chart.setOption({
-    tooltip: { trigger: 'axis' },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (ps: any) => {
+        const h = hours[ps?.[0]?.dataIndex ?? 0]
+        if (!h) return ''
+        const dot = (i: number) => ps?.[i]?.marker ?? ''
+        return [
+          h.label,
+          `${dot(0)}上传 ${formatChartBytes(h.up)}`,
+          `${dot(1)}下载 ${formatChartBytes(h.down)}`,
+          `合计 ${formatChartBytes(h.total)}`,
+        ].join('<br/>')
+      },
+    },
     legend: { data: ['上传', '下载'] },
     grid: { left: mobile ? 8 : 48, right: 12, top: 32, bottom: mobile ? 8 : 32, containLabel: true },
     xAxis: { type: 'category', data: hours.map((h: any) => h.label) },
@@ -245,9 +275,9 @@ function renderDaysChart() {
         if (!d) return ''
         return [
           `${d.date} ${d.weekday}`,
-          `上传 ${formatBytes(d.up)}`,
-          `下载 ${formatBytes(d.down)}`,
-          `合计 ${formatBytes(d.total)}`,
+          `上传 ${formatChartBytes(d.up)}`,
+          `下载 ${formatChartBytes(d.down)}`,
+          `合计 ${formatChartBytes(d.total)}`,
           `调用 ${formatCount(d.requests)} 次`,
         ].join('<br/>')
       },
