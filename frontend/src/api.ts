@@ -25,6 +25,8 @@ api.interceptors.response.use(
       if (router.currentRoute.value.path !== '/login') {
         router.push('/login')
       }
+      // 401 也要提示：否则密码错误时页面上一点反馈都没有
+      ElMessage.error(msg)
     } else {
       ElMessage.error(msg)
     }

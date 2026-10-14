@@ -16,6 +16,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing_subscriber::EnvFilter;
@@ -48,6 +49,10 @@ async fn main() -> Result<()> {
 
     let api_router = api::router(state.clone()).layer(cors);
 
+    // 前端 chunk 里最大的是看板（含 echarts，约 1MB），开 gzip 后约 350KB，
+    // 登录后首次进入看板明显更快。
+    let compress = CompressionLayer::new();
+
     let frontend_dir = frontend_dist();
     let app = if frontend_dir.join("index.html").exists() {
         let index = frontend_dir.join("index.html");
@@ -56,8 +61,9 @@ async fn main() -> Result<()> {
             .fallback_service(
                 ServeDir::new(&frontend_dir).not_found_service(ServeFile::new(index)),
             )
+            .layer(compress)
     } else {
-        axum::Router::new().nest("/api", api_router)
+        axum::Router::new().nest("/api", api_router).layer(compress)
     };
 
     let port: u16 = std::env::var("PORT")

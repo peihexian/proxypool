@@ -16,10 +16,15 @@
             size="large"
             show-password
             placeholder="管理员密码（默认 admin）"
-            @keyup.enter="onLogin"
           />
         </el-form-item>
-        <el-button type="primary" size="large" class="w-full" :loading="loading" @click="onLogin">
+        <el-button
+          type="primary"
+          size="large"
+          class="w-full"
+          native-type="submit"
+          :loading="loading"
+        >
           登录
         </el-button>
       </el-form>
@@ -38,14 +43,18 @@ const loading = ref(false)
 const router = useRouter()
 
 async function onLogin() {
+  // 回车与按钮点击都走表单 submit 这一条路径；这里再挡一次重复提交
+  if (loading.value) return
   loading.value = true
   try {
     const res: any = await login(password.value)
     localStorage.setItem('token', res.token)
     ElMessage.success('登录成功')
-    router.push('/')
+    // 必须等导航完成再收起 loading：首次进入要懒加载看板 chunk（约 1MB），
+    // 不等的话按钮已经恢复、页面还停在登录页，用户会以为没登上而重复点击
+    await router.push('/')
   } catch {
-    /* interceptor */
+    /* 拦截器已提示 */
   } finally {
     loading.value = false
   }
