@@ -9,7 +9,7 @@
         <el-button type="primary" @click="open()">新增策略</el-button>
       </div>
     </div>
-    <el-table :data="list" border stripe>
+    <el-table v-if="!isMobile" :data="list" border stripe>
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column label="检测间隔" width="110">
         <template #default="{ row }">{{ row.check_interval }}s</template>
@@ -29,6 +29,28 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div v-if="isMobile" class="mobile-list">
+      <div v-if="!list.length" class="m-empty">暂无检测策略</div>
+      <div v-for="row in list" :key="row.id" class="m-card">
+        <div class="m-card-head">
+          <div>
+            <div class="m-card-title">{{ row.name }}</div>
+            <div class="m-card-sub mono">{{ row.check_url }}</div>
+          </div>
+          <el-tag type="info" size="small">{{ row.check_interval }}s</el-tag>
+        </div>
+        <div class="m-card-meta">
+          <span>超时 <b>{{ row.timeout_ms }}ms</b></span>
+          <span>失败处理 <b>{{ failLabel(row.on_fail) }}</b></span>
+          <span>最大失败 <b>{{ row.max_fails }}</b></span>
+        </div>
+        <div class="m-card-actions">
+          <el-button text type="primary" size="small" @click="open(row)">编辑</el-button>
+          <el-button text type="danger" size="small" @click="remove(row)">删除</el-button>
+        </div>
+      </div>
+    </div>
 
     <el-dialog v-model="visible" :title="form.id ? '编辑策略' : '新增策略'" width="560px">
       <el-form :model="form" label-width="130px">
@@ -73,10 +95,12 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createPolicy, deletePolicy, fetchPolicies, updatePolicy } from '../api'
+import { useMobile } from '../useMedia'
 
 const list = ref<any[]>([])
 const visible = ref(false)
 const saving = ref(false)
+const isMobile = useMobile()
 const form = reactive<any>(empty())
 
 function empty() {

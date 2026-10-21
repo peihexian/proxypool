@@ -22,7 +22,7 @@
       </el-select>
       <el-button @click="load">查询</el-button>
     </div>
-    <el-table :data="items" border stripe v-loading="loading" style="width: 100%">
+    <el-table v-if="!isMobile" :data="items" border stripe v-loading="loading" style="width: 100%">
       <el-table-column prop="protocol" label="协议" width="90" />
       <el-table-column label="节点" min-width="180">
         <template #default="{ row }">
@@ -65,6 +65,35 @@
         </template>
       </el-table-column>
     </el-table>
+    <div v-if="isMobile" class="mobile-list" v-loading="loading">
+      <div v-if="!items.length" class="m-empty">暂无节点</div>
+      <div v-for="row in items" :key="row.id" class="m-card">
+        <div class="m-card-head">
+          <div>
+            <div class="m-card-title mono">{{ row.host }}:{{ row.port }}</div>
+            <div class="m-card-sub">{{ (row.protocol || '-').toUpperCase() }} · {{ row.username || '无账号' }}</div>
+          </div>
+          <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+        </div>
+        <div class="m-card-tags">
+          <el-tag v-if="row.is_residential" type="success" size="small">家庭宽带</el-tag>
+          <el-tag v-else type="info" size="small">其他宽带</el-tag>
+          <el-tag v-if="row.country_code" type="info" size="small">{{ row.country_code }}</el-tag>
+          <el-tag v-if="row.asn" type="info" size="small">AS{{ row.asn }}</el-tag>
+        </div>
+        <div class="m-card-meta">
+          <span>出口 IP <b class="mono">{{ row.exit_ip || '-' }}</b></span>
+          <span>延迟 <b>{{ row.latency_ms != null ? row.latency_ms + 'ms' : '-' }}</b></span>
+        </div>
+        <div v-if="row.asn_org" class="m-card-sub mt-1">{{ row.asn_org }}</div>
+        <div class="m-card-actions">
+          <el-button text type="primary" size="small" @click="onCheck(row)">检测</el-button>
+          <el-button v-if="row.status !== 'isolated'" text size="small" @click="setStatus(row, 'isolated')">隔离</el-button>
+          <el-button v-else text size="small" @click="setStatus(row, 'pending')">恢复</el-button>
+          <el-button text type="danger" size="small" @click="remove(row)">删除</el-button>
+        </div>
+      </div>
+    </div>
     <div class="mt-3 flex justify-end pagination-wrap">
       <el-pagination
         background

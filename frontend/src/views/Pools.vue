@@ -9,7 +9,7 @@
         <el-button type="primary" @click="open()">新增节点池</el-button>
       </div>
     </div>
-    <el-table :data="list" border stripe style="width: 100%">
+    <el-table v-if="!isMobile" :data="list" border stripe style="width: 100%">
       <el-table-column prop="name" label="名称" min-width="140">
         <template #default="{ row }">
           <el-button text type="primary" @click="$router.push(`/pools/${row.id}`)">{{ row.name }}</el-button>
@@ -47,6 +47,34 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div v-if="isMobile" class="mobile-list">
+      <div v-if="!list.length" class="m-empty">暂无节点池</div>
+      <div v-for="row in list" :key="row.id" class="m-card">
+        <div class="m-card-head">
+          <div>
+            <div class="m-card-title">{{ row.name }}</div>
+            <div class="m-card-sub">
+              {{ row.source_type === 'remote' ? '远程订阅' : '本地数据' }} ·
+              {{ (row.data_format || '-').toUpperCase() }} · {{ formatTime(row.updated_at) }}
+            </div>
+          </div>
+          <el-switch :model-value="row.enabled" @change="onToggle(row)" />
+        </div>
+        <div class="m-card-meta">
+          <span>节点 <b>{{ row.node_count }}</b></span>
+          <span>可用 <b>{{ row.active_count }}</b></span>
+          <span>隔离 <b>{{ row.isolated_count }}</b></span>
+        </div>
+        <div class="m-card-actions">
+          <el-button text type="primary" size="small" @click="$router.push(`/pools/${row.id}`)">节点</el-button>
+          <el-button text type="primary" size="small" @click="open(row)">编辑</el-button>
+          <el-button v-if="row.source_type === 'remote'" text size="small" @click="onSync(row)">同步</el-button>
+          <el-button text size="small" @click="onCheck(row)">检测</el-button>
+          <el-button text type="danger" size="small" @click="remove(row)">删除</el-button>
+        </div>
+      </div>
+    </div>
 
     <el-dialog v-model="visible" :title="form.id ? '编辑节点池' : '新增节点池'" width="720px" top="6vh">
       <el-form :model="form" label-width="140px">
@@ -153,6 +181,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { checkPool, createPool, deletePool, fetchPolicies, fetchPools, syncPool, togglePool, updatePool } from '../api'
 import { formatTime } from '../format'
+import { useMobile } from '../useMedia'
 
 const txtFormats = [
   { value: 'auto', label: '自动识别' },
@@ -175,6 +204,7 @@ const list = ref<any[]>([])
 const policies = ref<any[]>([])
 const visible = ref(false)
 const saving = ref(false)
+const isMobile = useMobile()
 const fileRef = ref<HTMLInputElement>()
 const form = reactive<any>(empty())
 

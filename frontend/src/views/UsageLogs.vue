@@ -9,7 +9,7 @@
         <el-button @click="load(true)" :loading="loading">刷新</el-button>
       </div>
     </div>
-    <el-table :data="list" border stripe style="width: 100%" empty-text="暂无使用记录">
+    <el-table v-if="!isMobile" :data="list" border stripe style="width: 100%" empty-text="暂无使用记录">
       <el-table-column label="时间" width="180">
         <template #default="{ row }">{{ formatTime(row.ts) }}</template>
       </el-table-column>
@@ -44,6 +44,29 @@
       </el-table-column>
       <el-table-column prop="service_name" label="服务" min-width="120" show-overflow-tooltip />
     </el-table>
+
+    <div v-if="isMobile" class="mobile-list">
+      <div v-if="!list.length" class="m-empty">暂无使用记录</div>
+      <div v-for="(row, i) in list" :key="`${row.ts}-${i}`" class="m-card">
+        <div class="m-card-head">
+          <div>
+            <div class="m-card-title mono">{{ row.client_ip || '-' }}</div>
+            <div class="m-card-sub">{{ formatTime(row.ts) }} · {{ row.service_name || '-' }}</div>
+          </div>
+          <el-tag v-if="row.protocol" size="small" :type="protoType(row.protocol)">
+            {{ row.protocol.toUpperCase() }}
+          </el-tag>
+        </div>
+        <div class="m-card-meta">
+          <span>代理 IP <b class="mono">{{ row.proxy_ip || '-' }}</b></span>
+          <span>上行 <b>{{ formatBytes(row.bytes_up) }}</b></span>
+          <span>下行 <b>{{ formatBytes(row.bytes_down) }}</b></span>
+        </div>
+        <div class="m-card-sub mt-1">
+          目标 <span class="mono">{{ row.dest || '-' }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -51,9 +74,11 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { fetchUsageLogs } from '../api'
 import { formatBytes, formatTime } from '../format'
+import { useMobile } from '../useMedia'
 
 const list = ref<any[]>([])
 const loading = ref(false)
+const isMobile = useMobile()
 let timer: ReturnType<typeof setInterval> | null = null
 
 function protoType(p: string) {

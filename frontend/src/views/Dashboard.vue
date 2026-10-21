@@ -108,6 +108,7 @@
             </div>
           </template>
           <el-table
+            v-if="!isMobile"
             :data="dayRows"
             border
             stripe
@@ -145,6 +146,26 @@
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="isMobile && !dayRows.length" class="m-empty">暂无流量数据</div>
+          <div v-else-if="isMobile" class="mobile-list">
+            <div v-for="row in dayRows" :key="row.date" class="m-card">
+              <div class="m-card-head">
+                <div>
+                  <div class="m-card-title">
+                    {{ row.date }} <span class="muted font-normal">{{ row.weekday }}</span>
+                  </div>
+                  <div class="m-card-sub">合计 {{ formatBytes(row.total) }}</div>
+                </div>
+                <span class="muted shrink-0">{{ share(row.total) }}%</span>
+              </div>
+              <div class="m-card-meta">
+                <span>上传 <b>{{ formatBytes(row.up) }}</b></span>
+                <span>下载 <b>{{ formatBytes(row.down) }}</b></span>
+                <span>调用 <b>{{ formatCount(row.requests) }}</b></span>
+              </div>
+              <el-progress class="mt-2" :percentage="share(row.total)" :show-text="false" color="#38bdf8" />
+            </div>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -152,16 +173,40 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { fetchDashboard } from '../api'
 import { formatBytes, formatCount } from '../format'
+import { useMobile } from '../useMedia'
+import { useTheme } from '../theme'
 
 const data = ref<any>({})
 const chartRef = ref<HTMLDivElement>()
 const daysChartRef = ref<HTMLDivElement>()
+const isMobile = useMobile()
+const { isDark } = useTheme()
 let chart: echarts.ECharts | null = null
 let daysChart: echarts.ECharts | null = null
+
+const chartPalette = computed(() =>
+  isDark.value
+    ? {
+        text: '#94a3b8',
+        axis: '#3b4a5f',
+        split: '#263244',
+        tooltipBg: '#1a2230',
+        tooltipBorder: '#2a3545',
+        tooltipText: '#e5eaf3',
+      }
+    : {
+        text: '#64748b',
+        axis: '#cbd5e1',
+        split: '#eef2f7',
+        tooltipBg: '#ffffff',
+        tooltipBorder: '#e2e8f0',
+        tooltipText: '#0f172a',
+      },
+)
 
 const summary = computed(() => data.value.days_summary || {})
 
@@ -238,10 +283,15 @@ function renderChart() {
   if (!chart) chart = echarts.init(chartRef.value)
   const hours = data.value.hours || []
   const mobile = window.innerWidth < 768
+  const p = chartPalette.value
   chart.setOption({
+    textStyle: { color: p.text },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      backgroundColor: p.tooltipBg,
+      borderColor: p.tooltipBorder,
+      textStyle: { color: p.tooltipText },
       formatter: (ps: any) => {
         const h = hours[ps?.[0]?.dataIndex ?? 0]
         if (!h) return ''
@@ -254,10 +304,22 @@ function renderChart() {
         ].join('<br/>')
       },
     },
-    legend: { data: ['上传', '下载'] },
+    legend: { data: ['上传', '下载'], textStyle: { color: p.text } },
     grid: { left: mobile ? 8 : 48, right: 12, top: 32, bottom: mobile ? 8 : 32, containLabel: true },
-    xAxis: { type: 'category', data: hours.map((h: any) => h.label) },
-    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => formatBytes(v) } },
+    xAxis: {
+      type: 'category',
+      data: hours.map((h: any) => h.label),
+      axisLabel: { color: p.text },
+      axisLine: { lineStyle: { color: p.axis } },
+      axisTick: { lineStyle: { color: p.axis } },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: p.text, formatter: (v: number) => formatBytes(v) },
+      axisLine: { lineStyle: { color: p.axis } },
+      axisTick: { lineStyle: { color: p.axis } },
+      splitLine: { lineStyle: { color: p.split } },
+    },
     series: [
       { name: '上传', type: 'bar', stack: 't', data: hours.map((h: any) => h.up), itemStyle: { color: '#38bdf8' } },
       { name: '下载', type: 'bar', stack: 't', data: hours.map((h: any) => h.down), itemStyle: { color: '#22d3ee' } },
@@ -270,9 +332,14 @@ function renderDaysChart() {
   if (!daysChart) daysChart = echarts.init(daysChartRef.value)
   const rows = days.value
   const mobile = window.innerWidth < 768
+  const p = chartPalette.value
   daysChart.setOption({
+    textStyle: { color: p.text },
     tooltip: {
       trigger: 'axis',
+      backgroundColor: p.tooltipBg,
+      borderColor: p.tooltipBorder,
+      textStyle: { color: p.tooltipText },
       formatter: (ps: any) => {
         const d = rows[ps?.[0]?.dataIndex ?? 0]
         if (!d) return ''
@@ -285,20 +352,31 @@ function renderDaysChart() {
         ].join('<br/>')
       },
     },
-    legend: { data: ['上传', '下载', '调用次数'] },
+    legend: { data: ['上传', '下载', '调用次数'], textStyle: { color: p.text } },
     grid: { left: mobile ? 8 : 48, right: mobile ? 8 : 52, top: 32, bottom: mobile ? 8 : 32, containLabel: true },
     xAxis: {
       type: 'category',
       data: rows.map((d: any) => d.label),
-      axisLabel: { interval: mobile ? 2 : 0 },
+      axisLabel: { color: p.text, interval: mobile ? 2 : 0 },
+      axisLine: { lineStyle: { color: p.axis } },
+      axisTick: { lineStyle: { color: p.axis } },
     },
     yAxis: [
-      { type: 'value', axisLabel: { formatter: (v: number) => formatBytes(v) } },
+      {
+        type: 'value',
+        axisLabel: { color: p.text, formatter: (v: number) => formatBytes(v) },
+        axisLine: { lineStyle: { color: p.axis } },
+        axisTick: { lineStyle: { color: p.axis } },
+        splitLine: { lineStyle: { color: p.split } },
+      },
       {
         type: 'value',
         name: '次',
+        nameTextStyle: { color: p.text },
         splitLine: { show: false },
-        axisLabel: { formatter: (v: number) => formatCount(v) },
+        axisLabel: { color: p.text, formatter: (v: number) => formatCount(v) },
+        axisLine: { lineStyle: { color: p.axis } },
+        axisTick: { lineStyle: { color: p.axis } },
       },
     ],
     series: [
@@ -333,6 +411,11 @@ onMounted(async () => {
   await load()
   window.addEventListener('resize', onResize)
 })
+watch([isDark, isMobile], async () => {
+  await nextTick()
+  renderChart()
+  renderDaysChart()
+})
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   chart?.dispose()
@@ -351,7 +434,7 @@ onUnmounted(() => {
 
 .day-summary .summary-hero {
   padding-bottom: 12px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border);
 }
 
 .summary-grid {

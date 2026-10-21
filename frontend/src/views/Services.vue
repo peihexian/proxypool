@@ -9,7 +9,7 @@
         <el-button type="primary" @click="open()">新增服务</el-button>
       </div>
     </div>
-    <el-table :data="list" border stripe style="width: 100%">
+    <el-table v-if="!isMobile" :data="list" border stripe style="width: 100%">
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column label="监听" width="150">
         <template #default="{ row }">
@@ -48,6 +48,35 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div v-if="isMobile" class="mobile-list">
+      <div v-if="!list.length" class="m-empty">暂无服务节点</div>
+      <div v-for="row in list" :key="row.id" class="m-card">
+        <div class="m-card-head">
+          <div>
+            <div class="m-card-title">{{ row.name }}</div>
+            <div class="m-card-sub mono">{{ row.listen_host }}:{{ row.listen_port }}</div>
+          </div>
+          <el-switch :model-value="row.enabled" @change="onToggle(row)" />
+        </div>
+        <div class="m-card-tags">
+          <el-tag v-if="row.enable_http" size="small" type="success">HTTP</el-tag>
+          <el-tag v-if="row.enable_socks5" size="small">SOCKS5</el-tag>
+          <el-tag v-if="row.enable_socks5h" size="small" type="warning">SOCKS5H</el-tag>
+          <el-tag :type="healthType(row.health)" size="small">{{ healthText(row.health) }}</el-tag>
+        </div>
+        <div class="m-card-meta">
+          <span>可用 IP <b>{{ row.available_nodes }}</b></span>
+          <span>策略 <b>{{ strategyLabel(row.selection_strategy) }}</b></span>
+        </div>
+        <div class="m-card-actions">
+          <el-button text type="primary" size="small" @click="open(row)">编辑</el-button>
+          <el-button text size="small" @click="showCurl(row)">复制</el-button>
+          <el-button text type="success" size="small" @click="onTest(row)">测试</el-button>
+          <el-button text type="danger" size="small" @click="remove(row)">删除</el-button>
+        </div>
+      </div>
+    </div>
 
     <el-dialog v-model="visible" :title="form.id ? '编辑服务节点' : '新增服务节点'" width="680px">
       <el-form :model="form" label-width="140px">
@@ -127,12 +156,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createService, deleteService, fetchCurl, fetchPools, fetchServices, testService, toggleService, updateService } from '../api'
+import { useMobile } from '../useMedia'
 
 const countries = ['US', 'JP', 'KR', 'SG', 'HK', 'TW', 'GB', 'DE', 'FR', 'NL', 'CA', 'AU', 'IN', 'BR', 'CN']
 const list = ref<any[]>([])
 const pools = ref<any[]>([])
 const visible = ref(false)
 const saving = ref(false)
+const isMobile = useMobile()
 const curlVisible = ref(false)
 const curl = ref<any>(null)
 const asnText = ref('')

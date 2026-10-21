@@ -7,7 +7,7 @@
     <el-drawer
       v-model="drawer"
       direction="ltr"
-      size="232px"
+      size="min(232px, 80vw)"
       :with-header="false"
       append-to-body
       class="layout-drawer"
@@ -25,7 +25,23 @@
           </el-button>
           <div class="layout-header-title">{{ title }}</div>
         </div>
-        <el-button text type="danger" @click="logout">{{ isMobile ? '退出' : '退出登录' }}</el-button>
+        <div class="layout-header-right">
+          <el-button
+            class="theme-toggle"
+            text
+            circle
+            :title="isDark ? '切换到浅色主题' : '切换到深色主题'"
+            :aria-label="isDark ? '切换到浅色主题' : '切换到深色主题'"
+            :aria-pressed="isDark"
+            @click="toggleTheme"
+          >
+            <el-icon :size="20">
+              <Sunny v-if="isDark" />
+              <Moon v-else />
+            </el-icon>
+          </el-button>
+          <el-button text type="danger" @click="logout">{{ isMobile ? '退出' : '退出登录' }}</el-button>
+        </div>
       </el-header>
       <el-main class="layout-main">
         <router-view />
@@ -38,12 +54,14 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMobile } from '../useMedia'
+import { useTheme } from '../theme'
 import SideBrand from '../components/SideBrand.vue'
 import SideMenu from '../components/SideMenu.vue'
 
 const route = useRoute()
 const router = useRouter()
 const isMobile = useMobile()
+const { isDark, toggleTheme } = useTheme()
 const drawer = ref(false)
 const active = computed(() => {
   if (route.path.startsWith('/pools')) return '/pools'

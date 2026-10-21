@@ -1,11 +1,5 @@
 <template>
-  <el-menu
-    :default-active="active"
-    router
-    background-color="#0b1220"
-    text-color="#94a3b8"
-    active-text-color="#67e8f9"
-  >
+  <el-menu :default-active="active" router class="side-menu">
     <el-menu-item v-for="item in items" :key="item.index" :index="item.index">
       <el-icon><component :is="item.icon" /></el-icon>
       <span>{{ item.label }}</span>
