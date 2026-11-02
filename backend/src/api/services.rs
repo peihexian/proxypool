@@ -1,13 +1,16 @@
 use crate::auth::AuthUser;
 use crate::db::{get_setting, now_rfc3339};
 use crate::error::{ApiResult, AppError};
-use crate::models::{ServiceNode, ServicePayload};
+use crate::models::{
+    AccountUpdateReq, BatchAccountsReq, ProxyAccount, ProxyAccountView, ServiceNode, ServicePayload,
+};
 use crate::proxy::selector;
 use crate::state::AppState;
 use axum::extract::{Path, State};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -16,6 +19,20 @@ pub fn router() -> Router<AppState> {
         .route("/services/{id}/toggle", post(toggle))
         .route("/services/{id}/test", post(test_service))
         .route("/services/{id}/curl", get(curl_cmds))
+        .route(
+            "/services/{id}/accounts",
+            get(list_accounts).post(create_accounts),
+        )
+        .route("/services/{id}/accounts/reassign", post(reassign_accounts))
+        .route(
+            "/services/{id}/accounts/password",
+            post(set_accounts_password),
+        )
+        .route("/services/{id}/accounts/clear", post(clear_accounts))
+        .route(
+            "/services/{id}/accounts/{account_id}",
+            put(update_account).delete(delete_account),
+        )
 }
 
 async fn list(State(state): State<AppState>, _u: AuthUser) -> ApiResult<Json<Value>> {
@@ -47,6 +64,20 @@ async fn service_view(state: &AppState, s: ServiceNode) -> Value {
     let available = selector::count_available(state, &s).await;
     let listening = state.listeners.contains_key(&s.id);
     let bind_error = state.bind_errors.get(&s.id).map(|e| e.clone());
+    let (account_count, account_bound_count, account_unique_ips): (i64, i64, i64) = sqlx::query_as(
+        r#"SELECT COUNT(*),
+                      COALESCE(SUM(CASE WHEN a.node_id IS NOT NULL THEN 1 ELSE 0 END), 0),
+                      COUNT(DISTINCT CASE WHEN a.node_id IS NOT NULL
+                          THEN COALESCE(NULLIF(TRIM(a.exit_ip), ''), n.host || ':' || n.port)
+                      END)
+               FROM proxy_accounts a
+               LEFT JOIN proxy_nodes n ON n.id = a.node_id
+               WHERE a.service_id=?"#,
+    )
+    .bind(&s.id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or((0, 0, 0));
     json!({
         "id": s.id,
         "name": s.name,
@@ -67,6 +98,9 @@ async fn service_view(state: &AppState, s: ServiceNode) -> Value {
         "created_at": s.created_at,
         "updated_at": s.updated_at,
         "available_nodes": available,
+        "account_count": account_count,
+        "account_bound_count": account_bound_count,
+        "account_unique_ips": account_unique_ips,
         "listening": listening,
         "bind_error": bind_error,
         "health": if s.enabled != 1 {
@@ -138,6 +172,10 @@ async fn update(
     if let Err(e) = crate::proxy::restart_service(&state, &id).await {
         return Err(AppError::bad(format!("监听启动失败: {e:#}")));
     }
+    // 过滤条件 / 引用节点池可能变了，账号固定 IP 需要重新校验。
+    if let Ok(svc) = load_service(&state, &id).await {
+        let _ = crate::accounts::reconcile_service(&state, &svc).await;
+    }
     get_one(State(state), _u, Path(id)).await
 }
 
@@ -189,6 +227,10 @@ async fn delete(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     crate::proxy::stop_service(&state, &id).await;
+    sqlx::query("DELETE FROM proxy_accounts WHERE service_id=?")
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
     sqlx::query("DELETE FROM service_nodes WHERE id=?")
         .bind(&id)
         .execute(&state.db)
@@ -296,6 +338,242 @@ async fn test_service(
     }
 }
 
+async fn load_service(state: &AppState, id: &str) -> ApiResult<ServiceNode> {
+    sqlx::query_as("SELECT * FROM service_nodes WHERE id=?")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("服务节点不存在"))
+}
+
+async fn list_accounts(
+    State(state): State<AppState>,
+    _u: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    load_service(&state, &id).await?;
+    let rows: Vec<ProxyAccountView> = sqlx::query_as(
+        r#"SELECT a.id, a.service_id, a.username, a.password, a.node_id, a.exit_ip,
+                  a.enabled, a.created_at, a.updated_at,
+                  n.protocol AS node_protocol, n.host AS node_host, n.port AS node_port,
+                  n.status AS node_status, n.latency_ms AS node_latency_ms,
+                  n.country_code AS node_country_code
+           FROM proxy_accounts a
+           LEFT JOIN proxy_nodes n ON n.id = a.node_id
+           WHERE a.service_id = ?
+           ORDER BY a.rowid"#,
+    )
+    .bind(&id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(json!(rows)))
+}
+
+async fn create_accounts(
+    State(state): State<AppState>,
+    _u: AuthUser,
+    Path(id): Path<String>,
+    Json(req): Json<BatchAccountsReq>,
+) -> ApiResult<Json<Value>> {
+    let svc = load_service(&state, &id).await?;
+    let prefix = req.prefix.as_deref().unwrap_or("user").trim();
+    let start = req.start.unwrap_or(1);
+    if prefix.is_empty() {
+        return Err(AppError::bad("账号前缀不能为空"));
+    }
+    if !prefix
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+    {
+        return Err(AppError::bad(
+            "账号前缀只能包含字母、数字、下划线、短横线和点",
+        ));
+    }
+    if !(1..=500).contains(&req.count) {
+        return Err(AppError::bad("一次分配的账号数量必须在 1 到 500 之间"));
+    }
+    if !(1..=999_999).contains(&start) {
+        return Err(AppError::bad("起始序号必须在 1 到 999999 之间"));
+    }
+    if req.password.is_empty() {
+        return Err(AppError::bad("统一密码不能为空"));
+    }
+    if req.password.len() > 128 {
+        return Err(AppError::bad("统一密码不能超过 128 个字符"));
+    }
+
+    let now = now_rfc3339();
+    let enabled = if req.enabled.unwrap_or(true) { 1 } else { 0 };
+    let mut tx = state.db.begin().await?;
+    let existing_names: Vec<String> =
+        sqlx::query_scalar("SELECT username FROM proxy_accounts WHERE service_id=?")
+            .bind(&id)
+            .fetch_all(&mut *tx)
+            .await?;
+    // 服务节点自身的账号不能被批量账号覆盖，否则认证会歧义。
+    let mut existing: HashSet<String> = existing_names.into_iter().collect();
+    existing.insert(svc.username.clone());
+
+    let mut created = Vec::new();
+    let mut skipped = Vec::new();
+    for offset in 0..req.count {
+        let username = format!("{prefix}{}", start + offset);
+        if username.len() > 64 || !username.is_ascii() {
+            tx.rollback().await.ok();
+            return Err(AppError::bad(format!("账号名 {username} 不合法")));
+        }
+        if existing.contains(&username) {
+            skipped.push(username);
+            continue;
+        }
+        sqlx::query(
+            r#"INSERT INTO proxy_accounts
+               (id, service_id, username, password, node_id, exit_ip, enabled, created_at, updated_at)
+               VALUES (?,?,?,?,NULL,NULL,?,?,?)"#,
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&id)
+        .bind(&username)
+        .bind(&req.password)
+        .bind(enabled)
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+        existing.insert(username.clone());
+        created.push(username);
+    }
+    tx.commit().await?;
+
+    if let Err(e) = crate::accounts::reconcile_service(&state, &svc).await {
+        tracing::warn!("reconcile accounts after batch create: {e:#}");
+    }
+
+    Ok(Json(json!({
+        "created": created,
+        "created_count": created.len(),
+        "skipped": skipped,
+        "skipped_count": skipped.len(),
+    })))
+}
+
+async fn update_account(
+    State(state): State<AppState>,
+    _u: AuthUser,
+    Path((id, account_id)): Path<(String, String)>,
+    Json(req): Json<AccountUpdateReq>,
+) -> ApiResult<Json<Value>> {
+    let svc = load_service(&state, &id).await?;
+    let account: ProxyAccount =
+        sqlx::query_as("SELECT * FROM proxy_accounts WHERE id=? AND service_id=?")
+            .bind(&account_id)
+            .bind(&id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or_else(|| AppError::not_found("账号不存在"))?;
+
+    let password = req.password.unwrap_or_else(|| account.password.clone());
+    if password.is_empty() {
+        return Err(AppError::bad("密码不能为空"));
+    }
+    if password.len() > 128 {
+        return Err(AppError::bad("密码不能超过 128 个字符"));
+    }
+    let enabled = req
+        .enabled
+        .map(|b| if b { 1 } else { 0 })
+        .unwrap_or(account.enabled);
+    sqlx::query("UPDATE proxy_accounts SET password=?, enabled=?, updated_at=? WHERE id=?")
+        .bind(&password)
+        .bind(enabled)
+        .bind(now_rfc3339())
+        .bind(&account_id)
+        .execute(&state.db)
+        .await?;
+
+    if let Err(e) = crate::accounts::reconcile_service(&state, &svc).await {
+        tracing::warn!("reconcile accounts after update: {e:#}");
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn delete_account(
+    State(state): State<AppState>,
+    _u: AuthUser,
+    Path((id, account_id)): Path<(String, String)>,
+) -> ApiResult<Json<Value>> {
+    let svc = load_service(&state, &id).await?;
+    let r = sqlx::query("DELETE FROM proxy_accounts WHERE id=? AND service_id=?")
+        .bind(&account_id)
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
+    if r.rows_affected() == 0 {
+        return Err(AppError::not_found("账号不存在"));
+    }
+    // 删掉账号后它占用的 IP 空出来了，让还在复用的账号迁移过去。
+    let _ = crate::accounts::reconcile_service(&state, &svc).await;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn clear_accounts(
+    State(state): State<AppState>,
+    _u: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    load_service(&state, &id).await?;
+    let r = sqlx::query("DELETE FROM proxy_accounts WHERE service_id=?")
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
+    Ok(Json(json!({ "ok": true, "deleted": r.rows_affected() })))
+}
+
+#[derive(serde::Deserialize)]
+struct AccountsPasswordReq {
+    password: String,
+}
+
+async fn set_accounts_password(
+    State(state): State<AppState>,
+    _u: AuthUser,
+    Path(id): Path<String>,
+    Json(req): Json<AccountsPasswordReq>,
+) -> ApiResult<Json<Value>> {
+    load_service(&state, &id).await?;
+    if req.password.is_empty() {
+        return Err(AppError::bad("密码不能为空"));
+    }
+    if req.password.len() > 128 {
+        return Err(AppError::bad("密码不能超过 128 个字符"));
+    }
+    let r = sqlx::query("UPDATE proxy_accounts SET password=?, updated_at=? WHERE service_id=?")
+        .bind(&req.password)
+        .bind(now_rfc3339())
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
+    Ok(Json(json!({ "ok": true, "updated": r.rows_affected() })))
+}
+
+async fn reassign_accounts(
+    State(state): State<AppState>,
+    _u: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let svc = load_service(&state, &id).await?;
+    let changed = crate::accounts::reconcile_service(&state, &svc)
+        .await
+        .map_err(|e| AppError::bad(format!("重新分配失败: {e:#}")))?;
+    let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM proxy_accounts WHERE service_id=?")
+        .bind(&id)
+        .fetch_one(&state.db)
+        .await?;
+    Ok(Json(
+        json!({ "ok": true, "changed": changed, "total": total }),
+    ))
+}
+
 fn validate(req: &ServicePayload) -> ApiResult<()> {
     if req.name.trim().is_empty() {
         return Err(AppError::bad("服务名称不能为空"));
@@ -313,7 +591,15 @@ fn validate(req: &ServicePayload) -> ApiResult<()> {
         return Err(AppError::bad("至少启用一种代理协议"));
     }
     let st = req.selection_strategy.as_deref().unwrap_or("round_robin");
-    if !["round_robin", "lowest_latency", "least_used", "idle_first", "sticky"].contains(&st) {
+    if ![
+        "round_robin",
+        "lowest_latency",
+        "least_used",
+        "idle_first",
+        "sticky",
+    ]
+    .contains(&st)
+    {
         return Err(AppError::bad("未知的选择策略"));
     }
     Ok(())

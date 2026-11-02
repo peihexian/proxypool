@@ -133,14 +133,9 @@ fn round_robin_with(
     nodes[i].clone()
 }
 
-async fn eligible_nodes(state: &AppState, svc: &ServiceNode) -> Result<Vec<ProxyNode>> {
+pub async fn eligible_nodes(state: &AppState, svc: &ServiceNode) -> Result<Vec<ProxyNode>> {
     let pool_ids: Vec<String> = serde_json::from_str(&svc.pool_ids).unwrap_or_default();
-    let countries: Vec<String> = serde_json::from_str::<Vec<String>>(&svc.filter_countries)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| s.to_uppercase())
-        .collect();
-    let asns: Vec<i64> = serde_json::from_str(&svc.filter_asns).unwrap_or_default();
+    let (countries, asns, residential) = service_filters(svc);
     let now = crate::db::now_rfc3339();
 
     let mut nodes: Vec<ProxyNode> = if pool_ids.is_empty() {
@@ -171,20 +166,7 @@ async fn eligible_nodes(state: &AppState, svc: &ServiceNode) -> Result<Vec<Proxy
         q.bind(&now).fetch_all(&state.db).await?
     };
 
-    if !countries.is_empty() {
-        nodes.retain(|n| {
-            n.country_code
-                .as_ref()
-                .map(|c| countries.iter().any(|x| x.eq_ignore_ascii_case(c)))
-                .unwrap_or(false)
-        });
-    }
-    if !asns.is_empty() {
-        nodes.retain(|n| n.asn.map(|a| asns.contains(&a)).unwrap_or(false));
-    }
-    if svc.filter_residential == 1 {
-        nodes.retain(|n| n.is_residential == 1);
-    }
+    nodes.retain(|n| matches_filters(n, &countries, &asns, residential));
     // Pending is only a fallback. Mixing untested IPs with working ones is what
     // makes the proxy look "down" while a subscription refresh is still probing.
     let active: Vec<ProxyNode> = nodes
@@ -203,4 +185,40 @@ pub async fn count_available(state: &AppState, svc: &ServiceNode) -> i64 {
         .await
         .map(|v| v.len() as i64)
         .unwrap_or(0)
+}
+
+/// 解析服务节点上的国家 / ASN / 家庭宽带过滤条件。
+pub fn service_filters(svc: &ServiceNode) -> (Vec<String>, Vec<i64>, bool) {
+    let countries: Vec<String> = serde_json::from_str::<Vec<String>>(&svc.filter_countries)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.to_uppercase())
+        .collect();
+    let asns: Vec<i64> = serde_json::from_str(&svc.filter_asns).unwrap_or_default();
+    (countries, asns, svc.filter_residential == 1)
+}
+
+/// 单个节点是否满足服务节点的过滤条件（账号固定绑定节点时使用）。
+pub fn matches_filters(
+    node: &ProxyNode,
+    countries: &[String],
+    asns: &[i64],
+    residential: bool,
+) -> bool {
+    if !countries.is_empty() {
+        match node.country_code.as_ref() {
+            Some(c) if countries.iter().any(|x| x.eq_ignore_ascii_case(c)) => {}
+            _ => return false,
+        }
+    }
+    if !asns.is_empty() {
+        match node.asn {
+            Some(a) if asns.contains(&a) => {}
+            _ => return false,
+        }
+    }
+    if residential && node.is_residential != 1 {
+        return false;
+    }
+    true
 }

@@ -62,11 +62,22 @@ export const setNodeStatus = (id: string, status: string) => api.post(`/nodes/${
 export const checkNode = (id: string) => api.post(`/nodes/${id}/check`)
 
 export const fetchServices = () => api.get('/services')
+export const fetchService = (id: string) => api.get(`/services/${id}`)
 export const createService = (data: any) => api.post('/services', data)
 export const updateService = (id: string, data: any) => api.put(`/services/${id}`, data)
 export const deleteService = (id: string) => api.delete(`/services/${id}`)
 export const toggleService = (id: string) => api.post(`/services/${id}/toggle`)
 export const testService = (id: string) => api.post(`/services/${id}/test`)
 export const fetchCurl = (id: string) => api.get(`/services/${id}/curl`)
+export const fetchServiceAccounts = (id: string) => api.get(`/services/${id}/accounts`)
+export const createServiceAccounts = (id: string, data: any) => api.post(`/services/${id}/accounts`, data)
+export const updateServiceAccount = (id: string, accountId: string, data: any) =>
+  api.put(`/services/${id}/accounts/${accountId}`, data)
+export const deleteServiceAccount = (id: string, accountId: string) =>
+  api.delete(`/services/${id}/accounts/${accountId}`)
+export const setServiceAccountsPassword = (id: string, password: string) =>
+  api.post(`/services/${id}/accounts/password`, { password })
+export const reassignServiceAccounts = (id: string) => api.post(`/services/${id}/accounts/reassign`)
+export const clearServiceAccounts = (id: string) => api.post(`/services/${id}/accounts/clear`)
 export const fetchDashboard = () => api.get('/dashboard')
 export const fetchUsageLogs = () => api.get('/logs')

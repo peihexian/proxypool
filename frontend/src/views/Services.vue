@@ -24,6 +24,18 @@
         </template>
       </el-table-column>
       <el-table-column label="可用 IP" width="90" prop="available_nodes" />
+      <el-table-column label="批量账号" width="120">
+        <template #default="{ row }">
+          <el-button
+            text
+            type="primary"
+            size="small"
+            @click="$router.push(`/services/${row.id}/accounts`)"
+          >
+            {{ row.account_count }} / {{ row.account_unique_ips }} IP
+          </el-button>
+        </template>
+      </el-table-column>
       <el-table-column label="策略" width="120">
         <template #default="{ row }">{{ strategyLabel(row.selection_strategy) }}</template>
       </el-table-column>
@@ -37,10 +49,11 @@
           <el-switch :model-value="row.enabled" @change="onToggle(row)" />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="240" min-width="240" class-name="ops-col" label-class-name="ops-col">
+      <el-table-column label="操作" width="300" min-width="300" class-name="ops-col" label-class-name="ops-col">
         <template #default="{ row }">
           <div class="ops-btns">
             <el-button text type="primary" size="small" @click="open(row)">编辑</el-button>
+            <el-button text type="primary" size="small" @click="$router.push(`/services/${row.id}/accounts`)">账号</el-button>
             <el-button text size="small" @click="showCurl(row)">复制</el-button>
             <el-button text type="success" size="small" @click="onTest(row)">测试</el-button>
             <el-button text type="danger" size="small" @click="remove(row)">删除</el-button>
@@ -67,10 +80,12 @@
         </div>
         <div class="m-card-meta">
           <span>可用 IP <b>{{ row.available_nodes }}</b></span>
+          <span>账号 <b>{{ row.account_count }}</b> / {{ row.account_unique_ips }} IP</span>
           <span>策略 <b>{{ strategyLabel(row.selection_strategy) }}</b></span>
         </div>
         <div class="m-card-actions">
           <el-button text type="primary" size="small" @click="open(row)">编辑</el-button>
+          <el-button text type="primary" size="small" @click="$router.push(`/services/${row.id}/accounts`)">账号</el-button>
           <el-button text size="small" @click="showCurl(row)">复制</el-button>
           <el-button text type="success" size="small" @click="onTest(row)">测试</el-button>
           <el-button text type="danger" size="small" @click="remove(row)">删除</el-button>

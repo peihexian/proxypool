@@ -1,3 +1,4 @@
+use crate::accounts::{self, Identity};
 use crate::models::ServiceNode;
 use crate::proxy::chain;
 use crate::proxy::selector;
@@ -23,17 +24,27 @@ pub async fn handle(
 
     let (head, rest) = read_headers(&mut stream).await?;
     let (method, target, headers) = parse_request(&head)?;
-    if !auth_ok(&svc, &headers) {
+    let identity = match credentials(&headers) {
+        Some((username, password)) => {
+            accounts::authenticate(&state, &svc, &username, &password).await
+        }
+        None => None,
+    };
+    let Some(identity) = identity else {
         stream
             .write_all(
                 b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"myproxy\"\r\nContent-Length: 0\r\n\r\n",
             )
             .await?;
         bail!("认证失败");
-    }
+    };
 
     let client_ip = peer.ip().to_string();
-    let node = match selector::pick_node(&state, &svc, &client_ip).await {
+    let node = match &identity {
+        Identity::Service => selector::pick_node(&state, &svc, &client_ip).await,
+        Identity::Account(account) => accounts::pick_for_account(&state, &svc, account).await,
+    };
+    let node = match node {
         Ok(n) => n,
         Err(e) => {
             let msg = e.to_string();
@@ -159,7 +170,7 @@ fn parse_request(head: &[u8]) -> Result<(String, String, HashMap<String, String>
     Ok((method, target, headers))
 }
 
-fn auth_ok(svc: &ServiceNode, headers: &HashMap<String, String>) -> bool {
+fn credentials(headers: &HashMap<String, String>) -> Option<(String, String)> {
     let raw = headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("proxy-authorization"))
@@ -169,23 +180,16 @@ fn auth_ok(svc: &ServiceNode, headers: &HashMap<String, String>) -> bool {
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case("authorization"))
                 .map(|(_, v)| v.as_str())
-        });
-    let Some(raw) = raw else {
-        return false;
-    };
-    let Some(b64) = raw.strip_prefix("Basic ").or_else(|| raw.strip_prefix("basic ")) else {
-        return false;
-    };
-    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64.trim()) else {
-        return false;
-    };
-    let Ok(pair) = String::from_utf8(bytes) else {
-        return false;
-    };
-    let Some((u, p)) = pair.split_once(':') else {
-        return false;
-    };
-    u == svc.username && p == svc.password
+        })?;
+    let b64 = raw
+        .strip_prefix("Basic ")
+        .or_else(|| raw.strip_prefix("basic "))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64.trim())
+        .ok()?;
+    let pair = String::from_utf8(bytes).ok()?;
+    let (u, p) = pair.split_once(':')?;
+    Some((u.to_string(), p.to_string()))
 }
 
 fn split_host_port(target: &str) -> Result<(String, u16)> {

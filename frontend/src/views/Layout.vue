@@ -65,6 +65,7 @@ const { isDark, toggleTheme } = useTheme()
 const drawer = ref(false)
 const active = computed(() => {
   if (route.path.startsWith('/pools')) return '/pools'
+  if (route.path.startsWith('/services')) return '/services'
   return route.path
 })
 const title = computed(() => {

@@ -28,6 +28,8 @@ pub struct AppState {
     pub traffic_tx: mpsc::Sender<TrafficEvent>,
     pub bind_errors: Arc<DashMap<String, String>>,
     pub usage_logs: Arc<Mutex<VecDeque<TrafficEvent>>>,
+    /// Serializes account rebalancing so two requests cannot claim the same egress IP.
+    pub account_lock: Arc<tokio::sync::Mutex<()>>,
     /// Pools currently refreshing a remote subscription. Health checks skip
     /// these so a long probe round cannot isolate the still-serving old nodes.
     pub syncing_pools: Arc<DashMap<String, ()>>,
@@ -89,6 +91,7 @@ impl AppState {
             traffic_tx,
             bind_errors: Arc::new(DashMap::new()),
             usage_logs: Arc::new(Mutex::new(VecDeque::new())),
+            account_lock: Arc::new(tokio::sync::Mutex::new(())),
             syncing_pools: Arc::new(DashMap::new()),
         }
     }
@@ -149,5 +152,3 @@ pub async fn load_enabled_services(db: &SqlitePool) -> sqlx::Result<Vec<ServiceN
         .fetch_all(db)
         .await
 }
-
-

@@ -60,6 +60,10 @@ pub struct ProxyNode {
     pub last_check: Option<String>,
     pub last_used: Option<String>,
     pub next_check: Option<String>,
+    /// 最近一次探测失败的原因，排查用；成功时清空。
+    pub last_error: Option<String>,
+    /// 人工隔离标记。置 1 后自动巡检不再碰这个节点，直到人工恢复。
+    pub manual_isolated: i64,
     pub created_at: String,
 }
 
@@ -141,6 +145,54 @@ pub struct SettingsUpdate {
     pub server_host: Option<String>,
     pub old_password: Option<String>,
     pub new_password: Option<String>,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct ProxyAccount {
+    pub id: String,
+    pub service_id: String,
+    pub username: String,
+    pub password: String,
+    pub node_id: Option<String>,
+    pub exit_ip: Option<String>,
+    pub enabled: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 账号列表视图：把账号当前绑定的上游节点一起查出来，省掉 N+1 查询。
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct ProxyAccountView {
+    pub id: String,
+    pub service_id: String,
+    pub username: String,
+    pub password: String,
+    pub node_id: Option<String>,
+    pub exit_ip: Option<String>,
+    pub enabled: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub node_protocol: Option<String>,
+    pub node_host: Option<String>,
+    pub node_port: Option<i64>,
+    pub node_status: Option<String>,
+    pub node_latency_ms: Option<i64>,
+    pub node_country_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BatchAccountsReq {
+    pub prefix: Option<String>,
+    pub start: Option<i64>,
+    pub count: i64,
+    pub password: String,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AccountUpdateReq {
+    pub password: Option<String>,
+    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

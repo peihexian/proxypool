@@ -1,3 +1,4 @@
+use crate::accounts::{self, Identity};
 use crate::models::ServiceNode;
 use crate::proxy::chain;
 use crate::proxy::selector;
@@ -44,10 +45,13 @@ pub async fn handle(
     stream.read_exact(&mut pass).await?;
     let username = String::from_utf8_lossy(&user);
     let password = String::from_utf8_lossy(&pass);
-    if username != svc.username || password != svc.password {
-        stream.write_all(&[0x01, 0x01]).await?;
-        bail!("SOCKS5 认证失败");
-    }
+    let identity = match accounts::authenticate(&state, &svc, &username, &password).await {
+        Some(id) => id,
+        None => {
+            stream.write_all(&[0x01, 0x01]).await?;
+            bail!("SOCKS5 认证失败");
+        }
+    };
     stream.write_all(&[0x01, 0x00]).await?;
 
     let mut req = [0u8; 4];
@@ -67,7 +71,11 @@ pub async fn handle(
     }
 
     let client_ip = peer.ip().to_string();
-    let node = match selector::pick_node(&state, &svc, &client_ip).await {
+    let node = match &identity {
+        Identity::Service => selector::pick_node(&state, &svc, &client_ip).await,
+        Identity::Account(account) => accounts::pick_for_account(&state, &svc, account).await,
+    };
+    let node = match node {
         Ok(n) => n,
         Err(_) => {
             reply_fail(&mut stream, 0x04).await?;

@@ -54,6 +54,11 @@
           <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="最近错误" min-width="220" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span class="muted">{{ row.last_error || '-' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="200" min-width="200" class-name="ops-col" label-class-name="ops-col">
         <template #default="{ row }">
           <div class="ops-btns">
@@ -86,6 +91,7 @@
           <span>延迟 <b>{{ row.latency_ms != null ? row.latency_ms + 'ms' : '-' }}</b></span>
         </div>
         <div v-if="row.asn_org" class="m-card-sub mt-1">{{ row.asn_org }}</div>
+        <div v-if="row.last_error" class="m-card-sub mt-1">最近错误：{{ row.last_error }}</div>
         <div class="m-card-actions">
           <el-button text type="primary" size="small" @click="onCheck(row)">检测</el-button>
           <el-button v-if="row.status !== 'isolated'" text size="small" @click="setStatus(row, 'isolated')">隔离</el-button>

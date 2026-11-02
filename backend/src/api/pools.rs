@@ -187,6 +187,7 @@ async fn update(
             .await
             .map_err(|e| AppError::bad(e.to_string()))?;
     }
+    let _ = crate::accounts::reconcile_all(&state).await;
     get_one(State(state), _u, Path(id)).await
 }
 
@@ -206,6 +207,7 @@ async fn delete(
     if r.rows_affected() == 0 {
         return Err(AppError::not_found("节点池不存在"));
     }
+    let _ = crate::accounts::reconcile_all(&state).await;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -219,6 +221,7 @@ async fn toggle(
         .bind(&id)
         .execute(&state.db)
         .await?;
+    let _ = crate::accounts::reconcile_all(&state).await;
     get_one(State(state), _u, Path(id)).await
 }
 
@@ -289,16 +292,18 @@ async fn check_all(
     let Some(policy) = policy else {
         return Err(AppError::bad("请先配置检测策略"));
     };
-    let nodes: Vec<crate::models::ProxyNode> =
-        sqlx::query_as("SELECT * FROM proxy_nodes WHERE pool_id=? AND status != 'disabled'")
-            .bind(&id)
-            .fetch_all(&state.db)
-            .await?;
+    let nodes: Vec<crate::models::ProxyNode> = sqlx::query_as(
+        "SELECT * FROM proxy_nodes WHERE pool_id=? AND status != 'disabled' AND manual_isolated=0",
+    )
+    .bind(&id)
+    .fetch_all(&state.db)
+    .await?;
     let st = state.clone();
     tokio::spawn(async move {
-        for n in nodes.into_iter().take(200) {
-            let _ = crate::worker::health::check_node(&st, &n, &policy).await;
-        }
+        // 走统一的批次逻辑：并发受限、单节点结果分类、并且带池级熔断，
+        // 手动"全部检测"也不会因为上游抖一下就把整池隔离掉。
+        let batch: Vec<_> = nodes.into_iter().take(200).collect();
+        crate::worker::health::check_batch(&st, &batch, &policy).await;
     });
     Ok(Json(json!({ "ok": true, "message": "已开始后台检测" })))
 }

@@ -111,6 +111,7 @@ async fn delete(
         .bind(&id)
         .execute(&state.db)
         .await?;
+    let _ = crate::accounts::reconcile_all(&state).await;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -128,18 +129,38 @@ async fn set_status(
     if !["active", "isolated", "disabled", "pending"].contains(&req.status.as_str()) {
         return Err(AppError::bad("无效状态"));
     }
-    let isolated = if req.status == "isolated" {
-        Some(chrono::Utc::now().to_rfc3339())
-    } else {
-        None
-    };
-    sqlx::query("UPDATE proxy_nodes SET status=?, isolated_until=?, fail_count=CASE WHEN ?='active' THEN 0 ELSE fail_count END WHERE id=?")
-        .bind(&req.status)
-        .bind(isolated)
-        .bind(&req.status)
-        .bind(&id)
-        .execute(&state.db)
-        .await?;
+    match req.status.as_str() {
+        // 人工隔离：打上 manual_isolated 标记，自动巡检不再碰这个节点，
+        // 也不会被 restore_expired 自动放出来。以前这里把 isolated_until 设成
+        // "现在"，15 秒后就被巡检改回 pending 了。
+        "isolated" => {
+            sqlx::query(
+                "UPDATE proxy_nodes SET status='isolated', isolated_until=NULL, next_check=NULL, manual_isolated=1 WHERE id=?",
+            )
+            .bind(&id)
+            .execute(&state.db)
+            .await?;
+        }
+        // 人工恢复：清空隔离标记和失败计数，下一次巡检重新给一次完整机会。
+        "active" | "pending" => {
+            sqlx::query(
+                "UPDATE proxy_nodes SET status=?, isolated_until=NULL, manual_isolated=0, fail_count=0, next_check=NULL, last_check=NULL, last_error=NULL WHERE id=?",
+            )
+            .bind(&req.status)
+            .bind(&id)
+            .execute(&state.db)
+            .await?;
+        }
+        _ => {
+            sqlx::query(
+                "UPDATE proxy_nodes SET status='disabled', isolated_until=NULL, manual_isolated=0 WHERE id=?",
+            )
+            .bind(&id)
+            .execute(&state.db)
+            .await?;
+        }
+    }
+    let _ = crate::accounts::reconcile_all(&state).await;
     Ok(Json(json!({ "ok": true })))
 }
 

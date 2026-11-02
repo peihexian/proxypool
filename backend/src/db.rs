@@ -79,6 +79,8 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
             last_check TEXT,
             last_used TEXT,
             next_check TEXT,
+            last_error TEXT,
+            manual_isolated INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             UNIQUE(pool_id, protocol, host, port, username)
         )"#,
@@ -102,6 +104,18 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )"#,
+        r#"CREATE TABLE IF NOT EXISTS proxy_accounts (
+            id TEXT PRIMARY KEY,
+            service_id TEXT NOT NULL,
+            username TEXT NOT NULL,
+            password TEXT NOT NULL,
+            node_id TEXT,
+            exit_ip TEXT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(service_id, username)
+        )"#,
         r#"CREATE TABLE IF NOT EXISTS traffic_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             service_id TEXT NOT NULL,
@@ -118,6 +132,8 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_traffic_client ON traffic_logs(client_ip)",
         "CREATE INDEX IF NOT EXISTS idx_nodes_pool ON proxy_nodes(pool_id)",
         "CREATE INDEX IF NOT EXISTS idx_nodes_status ON proxy_nodes(status)",
+        "CREATE INDEX IF NOT EXISTS idx_accounts_service ON proxy_accounts(service_id)",
+        "CREATE INDEX IF NOT EXISTS idx_accounts_node ON proxy_accounts(node_id)",
     ];
     for stmt in stmts {
         sqlx::query(stmt).execute(pool).await?;
@@ -149,6 +165,22 @@ async fn migrate(pool: &SqlitePool) -> Result<()> {
         "traffic_logs",
         "kind",
         "ALTER TABLE traffic_logs ADD COLUMN kind TEXT NOT NULL DEFAULT 'client'",
+    )
+    .await?;
+    // 探测失败原因，用来在节点列表里直接看到"为什么被隔离"。
+    ensure_column(
+        pool,
+        "proxy_nodes",
+        "last_error",
+        "ALTER TABLE proxy_nodes ADD COLUMN last_error TEXT",
+    )
+    .await?;
+    // 人工隔离标记：自动巡检跳过这些节点，避免手动隔离被下一轮探测改回去。
+    ensure_column(
+        pool,
+        "proxy_nodes",
+        "manual_isolated",
+        "ALTER TABLE proxy_nodes ADD COLUMN manual_isolated INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
     Ok(())
